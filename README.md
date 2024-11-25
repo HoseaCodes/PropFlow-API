@@ -83,25 +83,6 @@ mvn clean install
 mvn spring-boot:run
 ```
 
-### Frontend Setup
-
-1. Navigate to the frontend directory
-```bash
-cd frontend
-```
-
-2. Install dependencies
-```bash
-npm install
-```
-
-3. Start the development server
-```bash
-ng serve
-```
-
-4. Access the application at `http://localhost:4200`
-
 ## 🔒 Environment Variables
 
 Create a `.env` file in the root directory and add the following:
