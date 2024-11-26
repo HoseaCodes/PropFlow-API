@@ -8,35 +8,40 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
-import java.net.URI;
-import java.net.URISyntaxException;
 
 @Configuration
 public class DatabaseConfig {
 
-    @Value("${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/airbnb_management}")
+    @Value("${POSTGRES_URL}")
     private String dbUrl;
 
-    @Value("${JDBC_DATABASE_USERNAME:postgres}")
+    @Value("${POSTGRES_USER}")
     private String dbUsername;
 
-    @Value("${JDBC_DATABASE_PASSWORD:postgres}")
+    @Value("${POSTGRES_PASSWORD}")
     private String dbPassword;
 
     @Bean
     public DataSource dataSource() {
         HikariConfig config = new HikariConfig();
         
-        // Configure the connection pool
-        config.setJdbcUrl(dbUrl);
+        // Add "jdbc:" prefix if not present
+        String jdbcUrl = dbUrl.startsWith("jdbc:") ? dbUrl : "jdbc:" + dbUrl;
+        
+        config.setJdbcUrl(jdbcUrl);
         config.setUsername(dbUsername);
         config.setPassword(dbPassword);
         
-        // Optional: Configure pool settings
-        config.setMaximumPoolSize(10);
+        // Connection pool settings
+        config.setMaximumPoolSize(5);
         config.setMinimumIdle(2);
-        config.setIdleTimeout(300000);
-        config.setConnectionTimeout(20000);
+        config.setConnectionTimeout(30000); // 30 seconds
+        config.setIdleTimeout(600000); // 10 minutes
+        
+        // Add these properties for better PostgreSQL handling
+        config.addDataSourceProperty("cachePrepStmts", "true");
+        config.addDataSourceProperty("prepStmtCacheSize", "250");
+        config.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
         
         return new HikariDataSource(config);
     }
