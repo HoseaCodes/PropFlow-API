@@ -8,5 +8,12 @@ RUN mvn clean package -DskipTests
 FROM openjdk:17-jdk-slim
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
-EXPOSE 8081
-ENTRYPOINT ["java","-jar", "-Dserver.port=8081", "app.jar"]
+# EXPOSE 8081
+# ENTRYPOINT ["java","-jar", "-Dserver.port=8081", "app.jar"]
+EXPOSE ${PORT}
+CMD ["sh", "-c", "java -jar \
+    -Dspring.datasource.url=${DATABASE_URL} \
+    -Dspring.datasource.username=${DATABASE_USERNAME} \
+    -Dspring.datasource.password=${DATABASE_PASSWORD} \
+    -Dserver.port=${PORT} \
+    app.jar"]
