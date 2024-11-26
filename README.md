@@ -129,6 +129,25 @@ http://localhost:8080/api
 - `POST /expenses` - Add new expense
 - `GET /expenses/summary` - Get expense summary
 
+
+### Steps to Build and Run the Docker Container
+
+1. **Build the JAR file**: Make sure you have built the JAR file of your Spring Boot application. You can do this by running:
+  ```sh
+   ./mvnw clean package
+  ```
+2. **Build the Docker image**: Run the following command to build the Docker image:
+  ```docker
+    docker-compose build
+  ```
+
+3. **Run the Docker container**: Run the following command to start the container:
+  ```docker
+    docker-compose up
+  ```
+
+This will start your Spring Boot application inside a Docker container and map port 8081 of the container to port 8081 on your host machine. You can access your application at http://localhost:8081. 
+
 ## 🧪 Running Tests
 
 ### Backend Tests
