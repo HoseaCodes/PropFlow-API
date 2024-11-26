@@ -8,19 +8,5 @@ RUN mvn clean package -DskipTests
 FROM openjdk:17-jdk-slim
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
-
-# Add PostgreSQL JDBC driver
-RUN apt-get update && apt-get install -y wget \
-    && wget https://jdbc.postgresql.org/download/postgresql-42.6.0.jar \
-    && mv postgresql-42.6.0.jar postgresql.jar
-
-ENV PORT=8080
-EXPOSE ${PORT}
-
-CMD ["sh", "-c", "java -jar \
-    -Dserver.port=${PORT} \
-    -Dspring.profiles.active=prod \
-    -DPOSTGRES_URL=${POSTGRES_URL} \
-    -DPOSTGRES_USER=${POSTGRES_USER} \
-    -DPOSTGRES_PASSWORD=${POSTGRES_PASSWORD} \
-    app.jar"]
+EXPOSE 8081
+ENTRYPOINT ["java","-jar", "-Dserver.port=8081", "app.jar"]
