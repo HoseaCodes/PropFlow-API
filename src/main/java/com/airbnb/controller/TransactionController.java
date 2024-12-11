@@ -12,7 +12,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/transactions")
-@CrossOrigin(origins = "*")
+@CrossOrigin(origins = {"https://prop-flow-ui.vercel.app", "http://localhost:4200"})
 public class TransactionController {
     
     @Autowired
