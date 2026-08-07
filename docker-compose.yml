@@ -1,95 +1,82 @@
-# version: '3.8'
-
-# services:
-#   app:
-#     build: .
-#     ports:
-#       - "8081:8081"
-#     environment:
-#       - SPRING_PROFILES_ACTIVE=prod
-
-version: '3.8'
+# Local development stack for PropFlow API.
+#
+#   docker compose up -d db        # database only -- run the app from your IDE
+#   docker compose up --build      # full stack, app included
+#
+# Credentials here are throwaway values for a local container and are not
+# secrets. Real deployments supply DB_* via the environment or a secret manager.
 
 services:
-  # Spring Boot Application
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: spring-app
+    container_name: propflow-app
     ports:
-      - "8081:8081"
+      - "8080:8080"
     environment:
-      - SPRING_PROFILES_ACTIVE=docker
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/mydatabase
-      - SPRING_DATASOURCE_USERNAME=postgres
-      - SPRING_DATASOURCE_PASSWORD=postgres
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      PORT: 8080
+      # "db" is the Compose service name, resolved on the shared network.
+      # The previous configuration pointed at localhost, which inside the
+      # container refers to the container itself -- the app could never connect.
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-propflow}
+      DB_USERNAME: ${POSTGRES_USER:-propflow}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-propflow}
     depends_on:
-      - db
+      db:
+        # Wait for PostgreSQL to accept connections, not merely for the
+        # container to exist. Without this the app races the database on
+        # startup and fails its first connection attempt.
+        condition: service_healthy
     networks:
-      - spring-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - propflow
     restart: unless-stopped
-    volumes:
-      - ./logs:/app/logs
-      - ./uploads:/app/uploads
+    # NOTE: no healthcheck yet. The previous one probed /actuator/health, but
+    # Actuator is not a dependency and the port was wrong, so the container was
+    # permanently "unhealthy". A working probe is added alongside Actuator.
 
-  # PostgreSQL Database
   db:
     image: postgres:15-alpine
-    container_name: postgres-db
+    container_name: propflow-db
     ports:
-      - "5432:5432"
+      # Host port is configurable because 5432 is frequently already taken by
+      # another local PostgreSQL. Set DB_HOST_PORT in .env if it clashes, and
+      # update DB_URL to match. The app container is unaffected -- it reaches
+      # the database at db:5432 on the internal network.
+      - "${DB_HOST_PORT:-5432}:5432"
     environment:
-      - POSTGRES_DB=mydatabase
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: ${POSTGRES_DB:-propflow}
+      POSTGRES_USER: ${POSTGRES_USER:-propflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-propflow}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
-      - spring-network
+      - propflow
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-propflow} -d ${POSTGRES_DB:-propflow}"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
-  # pgAdmin for Database Management (optional)
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: pgadmin
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
-      - PGADMIN_DEFAULT_PASSWORD=admin
-    ports:
-      - "5050:80"
-    depends_on:
-      - db
-    networks:
-      - spring-network
-    restart: unless-stopped
-
-  # Adminer as lightweight alternative to pgAdmin (optional)
+  # Lightweight database browser at http://localhost:8082
   adminer:
     image: adminer
-    container_name: adminer
+    container_name: propflow-adminer
     ports:
-      - "8082:8082"
+      # Adminer listens on 8080 inside the container. The previous mapping was
+      # 8082:8082, so the service was unreachable.
+      - "8082:8080"
     depends_on:
       - db
     networks:
-      - spring-network
+      - propflow
     restart: unless-stopped
 
 volumes:
   postgres-data:
 
 networks:
-  spring-network:
+  propflow:
     driver: bridge

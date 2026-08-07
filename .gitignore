@@ -76,9 +76,13 @@ $RECYCLE.BIN/
 .env.development.local
 .env.test.local
 .env.production.local
+# Personal machine-specific overrides. Never tracked.
 application-local.properties
-application-dev.properties
+# Deployment config is supplied entirely by environment variables, so no
+# application-prod.properties should exist. Ignored to keep it that way.
 application-prod.properties
+# NOTE: application-dev.properties IS tracked. It holds shared, non-secret
+# development defaults (log levels, dev-only toggles). Secrets belong in .env.
 
 ### Secrets ###
 *.pem
