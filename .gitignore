@@ -90,6 +90,9 @@ application-prod.properties
 *.sqlite
 *.db
 *.sql
+# Flyway migrations are source code and must be tracked despite the *.sql rule above.
+!src/main/resources/db/migration/*.sql
+!src/test/resources/db/**/*.sql
 
 ### Compiled Java ###
 *.class
@@ -128,7 +131,5 @@ pids
 ### Yarn Integrity file ###
 .yarn-integrity
 
-
-mvnw.cmd
-mvnw
-.mvn
+### Local environment ###
+.env
