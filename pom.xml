@@ -8,11 +8,11 @@
 		<version>3.4.0</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.airbnb</groupId>
-	<artifactId>property-management</artifactId>
+	<groupId>com.hoseacodes</groupId>
+	<artifactId>propflow-api</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>airbnb-property-management</name>
-	<description>Airbnb Property Management System</description>
+	<name>propflow-api</name>
+	<description>PropFlow API - short-term rental property management</description>
 	<url/>
 	<licenses>
 		<license/>
