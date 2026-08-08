@@ -1,215 +1,215 @@
-# PropFlow API 🏠
+# PropFlow API
 
-PropFlow API is a comprehensive property management system designed for Airbnb hosts in Dallas, Texas. It helps hosts manage their properties, track expenses, handle bookings, and maintain cleaning schedules while ensuring compliance with local regulations.
+A REST API for managing short-term rental properties and their financial transactions — properties, income and expense records, tax categorisation, and recurring charges.
 
-## 🚀 Features
+> **Status: portfolio project, actively being hardened.**
+>
+> This repository is mid-way through a documented engineering review. A full audit of its current weaknesses is published in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md), and the remediation plan is in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md).
+>
+> **The API is currently unauthenticated** and should not be exposed to the internet. Authentication and authorization are the next items of work. This README documents only what the code actually does today; capabilities are added here as they land.
 
-- **Property Management**
-  - CRUD operations for properties
-  - Property details and pricing management
-  - STR permit tracking
-  - Photo management
+---
 
-- **Booking Management**
-  - Reservation tracking
-  - Check-in/check-out management
-  - Guest communication logs
-  - Occupancy tracking
+## Tech Stack
 
-- **Financial Management**
-  - Expense tracking
-  - Revenue monitoring
-  - Break-even analysis
-  - Financial projections
-  - Hotel occupancy tax calculations
-
-- **Cleaning Management**
-  - Cleaning schedule
-  - Customizable checklists
-  - Service provider management
-  - Quality tracking
-
-## 🛠️ Tech Stack
-
-### Backend
 - Java 17
-- Spring Boot 3.2.0
-- Spring Security
-- Spring Data JPA
-- PostgreSQL
-- Maven
-- JWT Authentication
+- Spring Boot 3.4.0
+- Spring Security (password hashing; endpoint protection **not yet** implemented)
+- Spring Data JPA / Hibernate 6
+- PostgreSQL 15
+- Maven (wrapper included)
+- Docker / Docker Compose
+- Lombok
 
-### Frontend
-- Angular 16+
-- TypeScript
-- Tailwind CSS
-- Node.js 18+
-- npm
+---
 
-## 📋 Prerequisites
+## Domain Model
 
-- JDK 17 or later
-- Node.js 18.x or later
-- PostgreSQL 13 or later
-- Maven 3.8+
-- Git
+```mermaid
+erDiagram
+    USER {
+        bigint id PK
+        string email UK
+        string username UK
+        string password
+        string first_name
+        string last_name
+        bigint version
+    }
+    PROPERTY {
+        bigint id PK
+        string name
+        string address
+        numeric base_price
+        int max_guests
+        int bedrooms
+        int bathrooms
+        bool active
+        string str_permit_number
+    }
+    TRANSACTION {
+        bigint id PK
+        string user_id "no FK - see audit H10"
+        bigint property_id "no FK - see audit H10"
+        string type "INCOME | EXPENSE"
+        string category
+        double transaction_amount
+        date date
+        string status
+    }
 
-## 🔧 Installation
+    USER ||..o{ TRANSACTION : "by user_id (unenforced)"
+    PROPERTY ||..o{ TRANSACTION : "by property_id (unenforced)"
+```
 
-### Backend Setup
+The dashed relationships are deliberate in this diagram: `Transaction` currently references users and properties by bare scalar columns with **no foreign key constraints**. This is a known defect (audit finding **H10**), not a design decision, and is scheduled for correction.
 
-1. Clone the repository
+`Booking`, `Expense`, and `CleaningChecklist` entities also exist in the codebase but have no repository, service, or API. They are unused.
+
+---
+
+## API
+
+Base URL: `http://localhost:8080`
+
+### Authentication
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/api/auth/signup` | Creates a user; password is BCrypt-hashed |
+| `POST` | `/api/auth/signin` | Verifies credentials. **Returns no token** — there is currently no way to authenticate a subsequent request. |
+
+### Properties
+| Method | Path |
+|---|---|
+| `GET` | `/api/properties` |
+| `GET` | `/api/properties/{id}` |
+| `POST` | `/api/properties` |
+| `PUT` | `/api/properties/{id}` |
+| `DELETE` | `/api/properties/{id}` |
+
+### Transactions
+| Method | Path |
+|---|---|
+| `GET` | `/api/transactions` |
+| `GET` | `/api/transactions/{id}` |
+| `GET` | `/api/transactions/user/{userId}` |
+| `GET` | `/api/transactions/property/{propertyId}` |
+| `POST` | `/api/transactions` |
+| `PUT` | `/api/transactions/{id}` |
+| `DELETE` | `/api/transactions/{id}` |
+| `POST` | `/api/transactions/search` | ⚠️ Filters are currently ignored — see audit **H2** |
+
+### Users
+| Method | Path |
+|---|---|
+| `GET` | `/api/users` |
+| `GET` | `/api/users/{id}` |
+| `POST` | `/api/users` | ⚠️ Stores the password **unhashed** — see audit **C3** |
+| `PUT` | `/api/users/{id}` |
+| `DELETE` | `/api/users/{id}` |
+
+A Postman collection covering the auth and user endpoints is at [`src/main/resources/postman.json`](src/main/resources/postman.json).
+
+---
+
+## Local Development
+
+### Prerequisites
+- JDK 17+
+- Docker (for PostgreSQL)
+
+### 1. Clone and configure
+
 ```bash
-git clone https://github.com/yourusername/PropFlow-API.git
+git clone https://github.com/HoseaCodes/PropFlow-API.git
 cd PropFlow-API
+cp .env.example .env
 ```
 
-2. Configure PostgreSQL
-```sql
-CREATE DATABASE airbnb_management;
-```
+`.env.example` contains placeholders only. The defaults point at the Docker Compose database and are throwaway local values, not secrets. If port 5432 is already in use on your machine, set `DB_HOST_PORT` in `.env` and update the port in `DB_URL` to match.
 
-3. Update application.properties
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/airbnb_management
-spring.datasource.username=your_username
-spring.datasource.password=your_password
-```
+### 2. Start PostgreSQL
 
-4. Build and run the backend
 ```bash
-mvn clean install
-mvn spring-boot:run
+docker compose up -d db
 ```
 
-## 🔒 Environment Variables
+> If you change `POSTGRES_USER` / `POSTGRES_PASSWORD` after the volume already exists, PostgreSQL will ignore them — those variables only apply when it initialises an empty data directory. Reset with `docker compose down -v`, which **deletes the local database volume**.
 
-Create a `.env` file in the root directory and add the following:
+### 3. Run the application
 
-```env
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=airbnb_management
-DB_USERNAME=your_username
-DB_PASSWORD=your_password
-
-# JWT Configuration
-JWT_SECRET=your_jwt_secret
-JWT_EXPIRATION=86400000
-
-# Server Configuration
-SERVER_PORT=8080
-```
-
-## 📚 API Documentation
-
-### Base URL
-```
-http://localhost:8080/api
-```
-
-### Endpoints
-
-#### Properties
-- `GET /properties` - Get all properties
-- `GET /properties/{id}` - Get property by ID
-- `POST /properties` - Create new property
-- `PUT /properties/{id}` - Update property
-- `DELETE /properties/{id}` - Delete property
-
-#### Bookings
-- `GET /bookings` - Get all bookings
-- `POST /bookings` - Create new booking
-- `PUT /bookings/{id}` - Update booking status
-
-#### Expenses
-- `GET /expenses` - Get all expenses
-- `POST /expenses` - Add new expense
-- `GET /expenses/summary` - Get expense summary
-
-
-### Steps to Build and Run the Docker Container
-
-1. **Build the JAR file**: Make sure you have built the JAR file of your Spring Boot application. You can do this by running:
-  ```sh
-   ./mvnw clean package
-  ```
-2. **Build the Docker image**: Run the following command to build the Docker image:
-  ```docker
-    docker-compose build
-  ```
-
-3. **Run the Docker container**: Run the following command to start the container:
-  ```docker
-    docker-compose up
-  ```
-
-This will start your Spring Boot application inside a Docker container and map port 8081 of the container to port 8081 on your host machine. You can access your application at http://localhost:8081. 
-
-## 🧪 Running Tests
-
-### Backend Tests
 ```bash
-mvn test
+./mvnw spring-boot:run
 ```
 
-### Frontend Tests
+The API listens on `http://localhost:8080`. Schema is currently created by Hibernate `ddl-auto=update` (a known weakness — audit **H4**; Flyway migrations are planned).
+
+### 4. Run the tests
+
 ```bash
-ng test
+docker compose up -d db   # required: the current test starts a full Spring context
+./mvnw test
 ```
 
-## 🚀 Deployment
+**The test suite is currently one `contextLoads()` test and requires a running database.** It verifies that Spring can wire the application; it does not verify any behaviour. Replacing this with meaningful unit, API, and Testcontainers-backed integration tests is the highest-priority work after authentication.
 
-1. Build the backend
+### Full stack in Docker
+
 ```bash
-mvn clean package
+docker compose up --build
 ```
 
-2. Build the frontend
-```bash
-ng build --prod
-```
+Also starts [Adminer](http://localhost:8082) for browsing the database.
 
-3. Deploy the generated artifacts to your server
+---
 
-## 📜 Dallas STR Regulations
+## Configuration
 
-Important regulations for Dallas Airbnb hosts:
-- STR Permit required for rentals ≤ 30 days
-- 7% hotel occupancy tax collection required
-- Compliance with local zoning restrictions
-- Written landlord permission required for rental properties
+All configuration is supplied by environment variables. See [`.env.example`](.env.example).
 
-## 🤝 Contributing
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_URL` | `jdbc:postgresql://localhost:5432/propflow` | JDBC URL |
+| `DB_USERNAME` | `propflow` | Database user |
+| `DB_PASSWORD` | `propflow` | Database password |
+| `DB_HOST_PORT` | `5432` | Host port for the Compose database |
+| `SPRING_PROFILES_ACTIVE` | `dev` | Active profile |
+| `PORT` | `8080` | HTTP port |
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+No credential is stored in a tracked file. The defaults above are non-secret values for a local throwaway container.
 
-## 📝 License
+---
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+## Known Limitations
 
-## 👥 Support
+Stated plainly, because the repository is a work in progress and unverified claims are worse than none. Full detail with file references is in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md).
 
-For support, email support@PropFlow.api or join our Slack channel.
+- **No authentication or authorization.** Every endpoint is publicly reachable.
+- **No JWT.** Sign-in verifies credentials but issues nothing the client can present.
+- **`POST /api/users` stores passwords in plaintext**, bypassing the hashing used by `/api/auth/signup`.
+- **API responses include the password hash**, because JPA entities are returned directly.
+- **No input validation.** No request body is validated.
+- **No database migrations.** Schema comes from Hibernate auto-DDL.
+- **Transaction search ignores its filters.**
+- **No meaningful tests**, no CI, no health endpoint, no metrics.
+- **OpenAPI/Swagger does not work** — the declared springdoc version targets Spring Boot 2.
 
-## ✨ Acknowledgements
+This project is **not production-ready** and is not deployed anywhere serving real users.
 
-- [Spring Boot](https://spring.io/projects/spring-boot)
-- [Angular](https://angular.io/)
-- [Tailwind CSS](https://tailwindcss.com/)
-- [PostgreSQL](https://www.postgresql.org/)
+---
 
-## 🛣️ Roadmap
+## Roadmap
 
-- [ ] Mobile application
-- [ ] Integration with Airbnb API
-- [ ] Smart pricing optimization
-- [ ] Automated guest communication
-- [ ] Advanced analytics dashboard
-- [ ] Multi-language support
+Tracked in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md):
+
+1. JWT authentication and per-user resource authorization
+2. Testcontainers-backed integration tests against real PostgreSQL
+3. Flyway schema migrations, foreign keys, and targeted indexes
+4. Request/response DTOs, validation, and an RFC 7807 error model
+5. Actuator health endpoints, working Docker Compose, GitHub Actions CI
+
+---
+
+## License
+
+[MIT](LICENSE)
