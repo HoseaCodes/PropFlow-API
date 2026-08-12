@@ -20,6 +20,8 @@ import com.hoseacodes.propflow.model.Role;
 import com.hoseacodes.propflow.model.User;
 import com.hoseacodes.propflow.repository.UserRepository;
 
+import jakarta.persistence.EntityManagerFactory;
+
 /**
  * Base class for integration tests that exercise the full stack:
  * controller -> service -> repository -> PostgreSQL.
@@ -69,6 +71,15 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected ObjectMapper objectMapper;
+
+    /**
+     * Exposed so tests can assert the number of SQL statements an endpoint
+     * issues, via Hibernate's {@code Statistics}. Query count is the only
+     * reliable way to regression-test an N+1: the response body looks identical
+     * whether a page cost 2 queries or 200.
+     */
+    @Autowired
+    protected EntityManagerFactory entityManagerFactory;
 
     @Autowired
     private UserRepository userRepository;

@@ -54,7 +54,7 @@ erDiagram
         bigint property_id "no FK - see audit H10"
         string type "INCOME | EXPENSE"
         string category
-        double transaction_amount
+        numeric transaction_amount
         date date
         string status
     }
@@ -105,16 +105,22 @@ Paged responses use a stable envelope rather than Spring's `PageImpl`:
 ```
 
 ### Transactions
-| Method | Path |
-|---|---|
-| `GET` | `/api/transactions` |
-| `GET` | `/api/transactions/{id}` |
-| `GET` | `/api/transactions/user/{userId}` |
-| `GET` | `/api/transactions/property/{propertyId}` |
-| `POST` | `/api/transactions` |
-| `PUT` | `/api/transactions/{id}` |
-| `DELETE` | `/api/transactions/{id}` |
-| `POST` | `/api/transactions/search` | ⚠️ Filters are currently ignored — see audit **H2** |
+| Method | Path | Success | Notes |
+|---|---|---|---|
+| `GET` | `/api/transactions` | `200` | Paged summaries |
+| `GET` | `/api/transactions/{id}` | `200` | Full record incl. tags and metadata |
+| `GET` | `/api/transactions/user/{userId}` | `200` | Paged |
+| `GET` | `/api/transactions/property/{propertyId}` | `200` | Paged |
+| `POST` | `/api/transactions` | `201` | Owner taken from the token, not the body |
+| `PUT` | `/api/transactions/{id}` | `200` | Partial-safe: unsent fields are preserved |
+| `DELETE` | `/api/transactions/{id}` | `204` | |
+| `POST` | `/api/transactions/search` | `200` | 16 optional filters, paged and sorted |
+
+List endpoints return **summaries** without tags, warranties, or metadata; the detail endpoint returns the full record. Those are lazy collections, so including them in a listing would cost up to three extra queries per row. An integration test asserts a 5-row page issues at most 2 SQL statements.
+
+`POST` is used for search deliberately: sixteen optional criteria including free text and date ranges do not encode comfortably as query parameters. The cost is that the response is not cacheable.
+
+Recording an `INCOME` transaction in an expense category (or vice versa) returns **422** — every field is individually valid, but the combination violates a domain rule.
 
 ### Users
 | Method | Path | Required role |
@@ -222,8 +228,7 @@ Stated plainly, because the repository is a work in progress and unverified clai
 - **Tokens cannot be revoked before they expire.** This is inherent to stateless JWT. Mitigated by a one-hour default lifetime and by reloading the user from the database on every request, so a deleted account stops authenticating immediately.
 - **No refresh-token flow.** Clients re-authenticate when the token expires.
 - **No rate limiting** on the sign-in endpoint.
-- **Transaction payloads are still JPA entities**, so those endpoints remain unvalidated and accept any field the entity exposes. Auth and property endpoints use validated DTOs.
-- **Transaction search ignores its filters.**
+- **Timestamps use `java.util.Date`** rather than `java.time`. Mutable and timezone-blind; a migration to `Instant`/`LocalDate` is outstanding.
 - **No CI**, no health endpoint, no metrics.
 - **Test coverage is partial.** Properties and the schema are covered end to end; transactions, users, and auth are not yet.
 - **OpenAPI/Swagger does not work** — the declared springdoc version targets Spring Boot 2.
@@ -240,9 +245,10 @@ Tracked in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md
 2. ~~Testcontainers-backed integration tests against real PostgreSQL~~ *(done)*
 3. ~~JWT authentication and role-based access control~~ *(done)*
 4. Per-user resource ownership and authorization
-5. Request/response DTOs and validation across the remaining endpoints
-6. Foreign keys, targeted indexes, and `BigDecimal` money
-7. Actuator health endpoints, working Docker Compose, GitHub Actions CI
+5. ~~Request/response DTOs and validation across all endpoints~~ *(done)*
+6. ~~`BigDecimal` money and optimistic locking~~ *(done)*
+7. Foreign keys and targeted indexes on transactions
+8. Actuator health endpoints, working Docker Compose, GitHub Actions CI
 
 ---
 

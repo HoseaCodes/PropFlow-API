@@ -1,26 +1,30 @@
 package com.hoseacodes.propflow.repository;
 
-import com.hoseacodes.propflow.model.transactions.Transaction;
-import com.hoseacodes.propflow.model.transactions.TransactionType;
-import com.hoseacodes.propflow.model.transactions.TransactionCategory;
-
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
-import java.util.Date;
-import java.util.List;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
-public interface TransactionRepository extends JpaRepository<Transaction, Long> {
-    List<Transaction> findByUserId(String userId);
-    List<Transaction> findByPropertyId(Long propertyId);
-    List<Transaction> findByUserIdAndPropertyId(String userId, Long propertyId);
-    
-    @Query("SELECT t FROM Transaction t WHERE t.date BETWEEN :startDate AND :endDate")
-    List<Transaction> findByDateRange(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
-    
-    @Query("SELECT t FROM Transaction t WHERE t.amount BETWEEN :minAmount AND :maxAmount")
-    List<Transaction> findByAmountRange(@Param("minAmount") Double minAmount, @Param("maxAmount") Double maxAmount);
-    
-    List<Transaction> findByType(TransactionType type);
-    List<Transaction> findByCategory(TransactionCategory category);
+import com.hoseacodes.propflow.model.transactions.Transaction;
+
+/**
+ * Transaction persistence.
+ *
+ * <p>{@link JpaSpecificationExecutor} is what makes the dynamic search work.
+ * Without it the {@code findAll(Specification, Pageable)} overload does not
+ * exist, so the service's call resolved to {@code findAll(Pageable)} instead --
+ * it compiled, returned a well-formed page, and silently ignored every filter.
+ * The bug was invisible because the response looked correct.
+ *
+ * <p>The narrow finders that were here previously ({@code findByType},
+ * {@code findByCategory}, {@code findByDateRange}, {@code findByAmountRange})
+ * are gone. None was called by anything, and each is a special case of the
+ * composable specifications in {@code TransactionSpecifications}.
+ */
+public interface TransactionRepository
+        extends JpaRepository<Transaction, Long>, JpaSpecificationExecutor<Transaction> {
+
+    Page<Transaction> findByUserId(String userId, Pageable pageable);
+
+    Page<Transaction> findByPropertyId(Long propertyId, Pageable pageable);
 }
