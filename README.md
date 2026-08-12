@@ -90,13 +90,19 @@ curl http://localhost:8080/api/properties -H "Authorization: Bearer $TOKEN"
 | `POST` | `/api/auth/signin` | Returns a signed JWT, its type, its lifetime, and the user |
 
 ### Properties
-| Method | Path |
-|---|---|
-| `GET` | `/api/properties` |
-| `GET` | `/api/properties/{id}` |
-| `POST` | `/api/properties` |
-| `PUT` | `/api/properties/{id}` |
-| `DELETE` | `/api/properties/{id}` |
+| Method | Path | Success | Notes |
+|---|---|---|---|
+| `GET` | `/api/properties` | `200` | Paged: `?page=&size=&sort=`. Default size 20, max 100. |
+| `GET` | `/api/properties/{id}` | `200` | `404` if unknown |
+| `POST` | `/api/properties` | `201` | Validated; returns `Location` |
+| `PUT` | `/api/properties/{id}` | `200` | Validated; full replacement |
+| `DELETE` | `/api/properties/{id}` | `204` | `404` if unknown |
+
+Paged responses use a stable envelope rather than Spring's `PageImpl`:
+
+```json
+{ "content": [ ... ], "page": 0, "size": 20, "totalElements": 42, "totalPages": 3, "last": false }
+```
 
 ### Transactions
 | Method | Path |
@@ -216,7 +222,7 @@ Stated plainly, because the repository is a work in progress and unverified clai
 - **Tokens cannot be revoked before they expire.** This is inherent to stateless JWT. Mitigated by a one-hour default lifetime and by reloading the user from the database on every request, so a deleted account stops authenticating immediately.
 - **No refresh-token flow.** Clients re-authenticate when the token expires.
 - **No rate limiting** on the sign-in endpoint.
-- **Property and transaction payloads are still JPA entities**, so those endpoints remain unvalidated and accept any field the entity exposes. Auth endpoints use validated DTOs.
+- **Transaction payloads are still JPA entities**, so those endpoints remain unvalidated and accept any field the entity exposes. Auth and property endpoints use validated DTOs.
 - **Transaction search ignores its filters.**
 - **No CI**, no health endpoint, no metrics.
 - **Test coverage is partial.** Properties and the schema are covered end to end; transactions, users, and auth are not yet.
