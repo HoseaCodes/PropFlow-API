@@ -142,16 +142,29 @@ docker compose up -d db
 ./mvnw spring-boot:run
 ```
 
-The API listens on `http://localhost:8080`. Schema is currently created by Hibernate `ddl-auto=update` (a known weakness — audit **H4**; Flyway migrations are planned).
+The API listens on `http://localhost:8080`.
+
+Flyway applies the migrations in [`src/main/resources/db/migration`](src/main/resources/db/migration) automatically at startup, in version order. Hibernate runs with `ddl-auto=validate`: it verifies that the entity mappings match the migrated schema and refuses to start if they have drifted, but never modifies the schema itself.
 
 ### 4. Run the tests
 
 ```bash
-docker compose up -d db   # required: the current test starts a full Spring context
-./mvnw test
+./mvnw test      # unit tests only — fast, no Docker required
+./mvnw verify    # unit + integration tests — starts a PostgreSQL container
 ```
 
-**The test suite is currently one `contextLoads()` test and requires a running database.** It verifies that Spring can wire the application; it does not verify any behaviour. Replacing this with meaningful unit, API, and Testcontainers-backed integration tests is the highest-priority work after authentication.
+Tests are split into two tiers:
+
+| Tier | Naming | Runner | What it covers |
+|---|---|---|---|
+| **Unit** | `*Test` | Surefire (`mvn test`) | Pure logic — no Spring context, no database. Runs in well under a second. |
+| **Integration** | `*IT` | Failsafe (`mvn verify`) | Full stack: HTTP → controller → service → repository → real PostgreSQL. |
+
+Integration tests run against **PostgreSQL in Docker via Testcontainers**, not an in-memory database. An in-memory database in "PostgreSQL compatibility mode" is not PostgreSQL — it diverges on type coercion, constraint semantics, sequences, `NUMERIC` precision, and SQL dialect — so a test that passes against it is not evidence about the database this application actually deploys on.
+
+The container is started once per JVM and shared across all integration test classes, and Flyway migrates the fresh database on first startup. Every run is therefore continuous proof that the migrations apply cleanly from nothing.
+
+You do **not** need `docker compose up -d db` to run the tests; Testcontainers manages its own database. Only Docker itself is required.
 
 ### Full stack in Docker
 
@@ -189,9 +202,9 @@ Stated plainly, because the repository is a work in progress and unverified clai
 - **`POST /api/users` stores passwords in plaintext**, bypassing the hashing used by `/api/auth/signup`.
 - **API responses include the password hash**, because JPA entities are returned directly.
 - **No input validation.** No request body is validated.
-- **No database migrations.** Schema comes from Hibernate auto-DDL.
 - **Transaction search ignores its filters.**
-- **No meaningful tests**, no CI, no health endpoint, no metrics.
+- **No CI**, no health endpoint, no metrics.
+- **Test coverage is partial.** Properties and the schema are covered end to end; transactions, users, and auth are not yet.
 - **OpenAPI/Swagger does not work** — the declared springdoc version targets Spring Boot 2.
 
 This project is **not production-ready** and is not deployed anywhere serving real users.
