@@ -61,11 +61,7 @@ class TransactionApiIT extends AbstractIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        jdbc.update("DELETE FROM transaction_tags");
-        jdbc.update("DELETE FROM transaction_warranties");
-        jdbc.update("DELETE FROM transaction_metadata");
-        transactionRepository.deleteAll();
-        propertyRepository.deleteAll();
+        resetDatabase();
 
         auth = registerAndSignIn("txn-user-" + System.nanoTime());
         propertyId = createProperty("Bishop Arts Bungalow");
@@ -440,7 +436,7 @@ class TransactionApiIT extends AbstractIntegrationTest {
             // called save(), replacing the whole row and nulling everything the
             // request omitted.
             assertThat(after.getCreatedAt()).isEqualTo(originalCreatedAt);
-            assertThat(after.getUserId()).isEqualTo(before.getUserId());
+            assertThat(after.getUser().getId()).isEqualTo(before.getUser().getId());
             assertThat(after.getPropertyName()).isEqualTo("Bishop Arts Bungalow");
         }
 

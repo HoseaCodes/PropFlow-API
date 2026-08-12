@@ -15,6 +15,7 @@ import com.hoseacodes.propflow.model.Property;
  */
 public record PropertyResponse(
         Long id,
+        Long ownerId,
         String name,
         String address,
         String description,
@@ -31,6 +32,10 @@ public record PropertyResponse(
     public static PropertyResponse from(Property property) {
         return new PropertyResponse(
                 property.getId(),
+                // Identifier only -- reading it does not initialise the lazy
+                // proxy, and the owner's email and name are not this
+                // resource's business.
+                property.getOwner().getId(),
                 property.getName(),
                 property.getAddress(),
                 property.getDescription(),

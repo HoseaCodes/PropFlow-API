@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +21,7 @@ import com.hoseacodes.propflow.dto.request.PropertyRequest;
 import com.hoseacodes.propflow.dto.response.PagedResponse;
 import com.hoseacodes.propflow.dto.response.PropertyResponse;
 import com.hoseacodes.propflow.model.Property;
+import com.hoseacodes.propflow.model.User;
 import com.hoseacodes.propflow.service.PropertyService;
 
 import jakarta.validation.Valid;
@@ -53,15 +55,18 @@ public class PropertyController {
     @GetMapping
     public ResponseEntity<PagedResponse<PropertyResponse>> getAllProperties(
             @PageableDefault(size = 20, sort = "id", direction = Sort.Direction.ASC)
-            Pageable pageable) {
+            Pageable pageable,
+            @AuthenticationPrincipal User principal) {
 
-        Page<Property> page = propertyService.getAllProperties(pageable);
+        Page<Property> page = propertyService.getAllProperties(principal, pageable);
         return ResponseEntity.ok(PagedResponse.from(page, PropertyResponse::from));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<PropertyResponse> getProperty(@PathVariable Long id) {
-        return ResponseEntity.ok(PropertyResponse.from(propertyService.getProperty(id)));
+    public ResponseEntity<PropertyResponse> getProperty(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User principal) {
+        return ResponseEntity.ok(PropertyResponse.from(propertyService.getProperty(id, principal)));
     }
 
     /**
@@ -74,9 +79,10 @@ public class PropertyController {
      */
     @PostMapping
     public ResponseEntity<PropertyResponse> createProperty(
-            @Valid @RequestBody PropertyRequest request) {
+            @Valid @RequestBody PropertyRequest request,
+            @AuthenticationPrincipal User principal) {
 
-        Property created = propertyService.createProperty(request);
+        Property created = propertyService.createProperty(request, principal);
         return ResponseEntity
                 .created(URI.create("/api/properties/" + created.getId()))
                 .body(PropertyResponse.from(created));
@@ -85,15 +91,19 @@ public class PropertyController {
     @PutMapping("/{id}")
     public ResponseEntity<PropertyResponse> updateProperty(
             @PathVariable Long id,
-            @Valid @RequestBody PropertyRequest request) {
+            @Valid @RequestBody PropertyRequest request,
+            @AuthenticationPrincipal User principal) {
 
-        return ResponseEntity.ok(PropertyResponse.from(propertyService.updateProperty(id, request)));
+        return ResponseEntity.ok(
+                PropertyResponse.from(propertyService.updateProperty(id, request, principal)));
     }
 
     /** 204, not the previous 200 with an empty body: there is nothing to return. */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteProperty(@PathVariable Long id) {
-        propertyService.deleteProperty(id);
+    public ResponseEntity<Void> deleteProperty(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User principal) {
+        propertyService.deleteProperty(id, principal);
         return ResponseEntity.noContent().build();
     }
 }

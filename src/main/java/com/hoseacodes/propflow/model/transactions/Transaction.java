@@ -21,11 +21,14 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MapKeyColumn;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import com.hoseacodes.propflow.model.Property;
+import com.hoseacodes.propflow.model.User;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -59,14 +62,30 @@ public class Transaction {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // AUDIT H10: user_id is a String while users.id is a Long, and neither this
-    // nor propertyId has a foreign key. Corrected in a later migration together
-    // with the ownership model.
-    @Column(nullable = false)
-    private String userId;
+    /**
+     * The account this transaction belongs to.
+     *
+     * <p>Was a {@code String userId} with no foreign key, while {@code users.id}
+     * is a {@code Long} -- so a transaction could reference a user that never
+     * existed, and the two columns could not even be joined without a cast.
+     *
+     * <p>{@code LAZY}: listing transactions must not load a user row per
+     * transaction. {@code getUser().getId()} is safe on the proxy.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
 
-    @Column(nullable = false)
-    private Long propertyId;
+    /**
+     * The property this transaction relates to.
+     *
+     * <p>The foreign key means a transaction can no longer reference a property
+     * that does not exist, and {@code ON DELETE RESTRICT} means deleting a
+     * property with financial history fails loudly instead of orphaning it.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "property_id", nullable = false)
+    private Property property;
 
     /**
      * The property's name as it was when the transaction was recorded.

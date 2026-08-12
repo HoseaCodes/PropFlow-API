@@ -27,45 +27,54 @@ A REST API for managing short-term rental properties and their financial transac
 
 ```mermaid
 erDiagram
+    USER ||--o{ PROPERTY : owns
+    USER ||--o{ TRANSACTION : records
+    PROPERTY ||--o{ TRANSACTION : "incurs / earns"
+    PROPERTY ||--o{ BOOKING : "is reserved by"
+
     USER {
         bigint id PK
-        string email UK
-        string username UK
-        string password
-        string first_name
-        string last_name
+        string email UK "unique on lower(email)"
+        string username UK "unique on lower(username)"
+        string password "BCrypt hash"
         string role "USER | ADMIN"
-        bigint version
+        bigint version "optimistic lock"
     }
     PROPERTY {
         bigint id PK
+        bigint owner_id FK "-> users.id, RESTRICT"
         string name
         string address
-        numeric base_price
-        int max_guests
-        int bedrooms
-        int bathrooms
-        bool active
+        numeric base_price "NUMERIC(19,2)"
+        boolean active
         string str_permit_number
+        bigint version
     }
     TRANSACTION {
         bigint id PK
-        string user_id "no FK - see audit H10"
-        bigint property_id "no FK - see audit H10"
+        bigint user_id FK "-> users.id, RESTRICT"
+        bigint property_id FK "-> properties.id, RESTRICT"
+        string property_name "point-in-time snapshot"
         string type "INCOME | EXPENSE"
         string category
-        numeric transaction_amount
-        date date
-        string status
+        numeric transaction_amount "NUMERIC(19,2), > 0"
+        timestamp date
+        bigint version
     }
-
-    USER ||..o{ TRANSACTION : "by user_id (unenforced)"
-    PROPERTY ||..o{ TRANSACTION : "by property_id (unenforced)"
+    BOOKING {
+        bigint id PK
+        bigint property_id FK "-> properties.id"
+        timestamp check_in
+        timestamp check_out
+        numeric total_price
+    }
 ```
 
-The dashed relationships are deliberate in this diagram: `Transaction` currently references users and properties by bare scalar columns with **no foreign key constraints**. This is a known defect (audit finding **H10**), not a design decision, and is scheduled for correction.
+Every relationship is a real foreign key with `ON DELETE RESTRICT`. Deleting a user who still owns properties, or a property that still has transactions, is refused by the database rather than silently orphaning financial history — the API surfaces that as `409`.
 
-A `Booking` entity and table also exist, with a proper foreign key to `properties`, but no API is exposed for it yet. The unused `Expense` and `CleaningChecklist` entities were removed — `Expense` duplicated `Transaction`, and neither had any endpoint.
+`property_name` on a transaction is deliberately denormalised: a financial record should show the name in force when it was written, so renaming a property does not rewrite past statements.
+
+`Booking` entity and table also exist, with a proper foreign key to `properties`, but no API is exposed for it yet. The unused `Expense` and `CleaningChecklist` entities were removed — `Expense` duplicated `Transaction`, and neither had any endpoint.
 
 ---
 
@@ -74,6 +83,8 @@ A `Booking` entity and table also exist, with a proper foreign key to `propertie
 Base URL: `http://localhost:8080`
 
 Every endpoint requires a bearer token except `POST /api/auth/signup`, `POST /api/auth/signin`, and the OpenAPI paths. Unauthenticated requests receive `401`; authenticated requests lacking the required role receive `403`. Both are RFC 7807 `application/problem+json`.
+
+**Every property and transaction read is scoped to the authenticated owner.** Requesting a resource that belongs to someone else returns **`404`, not `403`** — a 403 would confirm the id exists and let an attacker enumerate the id space. Scoping is applied inside the query (`findByIdAndOwner`, and an ownership `Specification` on transactions) rather than as a check after loading, so a forgotten scope fails closed. Accounts with the `ADMIN` role read across owners.
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/signin \
@@ -109,7 +120,6 @@ Paged responses use a stable envelope rather than Spring's `PageImpl`:
 |---|---|---|---|
 | `GET` | `/api/transactions` | `200` | Paged summaries |
 | `GET` | `/api/transactions/{id}` | `200` | Full record incl. tags and metadata |
-| `GET` | `/api/transactions/user/{userId}` | `200` | Paged |
 | `GET` | `/api/transactions/property/{propertyId}` | `200` | Paged |
 | `POST` | `/api/transactions` | `201` | Owner taken from the token, not the body |
 | `PUT` | `/api/transactions/{id}` | `200` | Partial-safe: unsent fields are preserved |
@@ -224,11 +234,12 @@ No credential is stored in a tracked file. The database defaults above are non-s
 
 Stated plainly, because the repository is a work in progress and unverified claims are worse than none. Full detail with file references is in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md).
 
-- **No per-row ownership checks yet.** Any authenticated user can read and modify *any* property or transaction. Roles are enforced; resource ownership is not. This is the next piece of work and is the most important remaining gap.
 - **Tokens cannot be revoked before they expire.** This is inherent to stateless JWT. Mitigated by a one-hour default lifetime and by reloading the user from the database on every request, so a deleted account stops authenticating immediately.
 - **No refresh-token flow.** Clients re-authenticate when the token expires.
 - **No rate limiting** on the sign-in endpoint.
 - **Timestamps use `java.util.Date`** rather than `java.time`. Mutable and timezone-blind; a migration to `Instant`/`LocalDate` is outstanding.
+- **No `Booking` API.** The table and entity exist; date-overlap prevention is not implemented.
+- **Free-text search is a sequential scan.** `LIKE '%term%'` cannot use a B-tree index. Fine at this scale; the upgrade path is a `tsvector` + GIN index.
 - **No CI**, no health endpoint, no metrics.
 - **Test coverage is partial.** Properties and the schema are covered end to end; transactions, users, and auth are not yet.
 - **OpenAPI/Swagger does not work** — the declared springdoc version targets Spring Boot 2.
@@ -247,8 +258,9 @@ Tracked in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md
 4. Per-user resource ownership and authorization
 5. ~~Request/response DTOs and validation across all endpoints~~ *(done)*
 6. ~~`BigDecimal` money and optimistic locking~~ *(done)*
-7. Foreign keys and targeted indexes on transactions
+7. ~~Resource ownership, foreign keys, and targeted indexes~~ *(done)*
 8. Actuator health endpoints, working Docker Compose, GitHub Actions CI
+9. Architecture, security, and operations documentation
 
 ---
 

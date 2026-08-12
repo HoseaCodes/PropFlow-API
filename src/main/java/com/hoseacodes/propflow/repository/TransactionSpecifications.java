@@ -31,14 +31,32 @@ public final class TransactionSpecifications {
     private TransactionSpecifications() {
     }
 
-    public static Specification<Transaction> ownedBy(String userId) {
+    /**
+     * Restricts results to one owner.
+     *
+     * <p>This is an authorization control, not a user-facing filter. It is
+     * composed into every read from the authenticated principal and is
+     * deliberately not exposed on the search request type -- a scope a client
+     * can supply is a filter, and a filter can be omitted.
+     *
+     * <p>Compares on {@code user.id} rather than navigating to the User entity,
+     * so the generated SQL uses the {@code user_id} foreign key column directly
+     * and matches the leading column of ix_transactions_user_id_date. No join is
+     * emitted.
+     */
+    public static Specification<Transaction> ownedBy(Long userId) {
         return userId == null ? null
-                : (root, query, cb) -> cb.equal(root.get("userId"), userId);
+                : (root, query, cb) -> cb.equal(root.get("user").get("id"), userId);
     }
 
     public static Specification<Transaction> forProperty(Long propertyId) {
         return propertyId == null ? null
-                : (root, query, cb) -> cb.equal(root.get("propertyId"), propertyId);
+                : (root, query, cb) -> cb.equal(root.get("property").get("id"), propertyId);
+    }
+
+    public static Specification<Transaction> hasId(Long id) {
+        return id == null ? null
+                : (root, query, cb) -> cb.equal(root.get("id"), id);
     }
 
     public static Specification<Transaction> dateFrom(Date start) {

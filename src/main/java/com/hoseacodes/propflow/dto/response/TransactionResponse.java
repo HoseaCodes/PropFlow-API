@@ -92,7 +92,9 @@ public record TransactionResponse(
     public static TransactionResponse from(Transaction t) {
         return new TransactionResponse(
                 t.getId(),
-                t.getPropertyId(),
+                // Reading the id off a lazy proxy does not initialise it,
+                // so this costs no extra query.
+                t.getProperty().getId(),
                 t.getPropertyName(),
                 t.getBookingReference(),
                 t.getBookingId(),

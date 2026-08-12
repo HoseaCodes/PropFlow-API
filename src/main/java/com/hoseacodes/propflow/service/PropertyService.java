@@ -8,27 +8,32 @@ import org.springframework.transaction.annotation.Transactional;
 import com.hoseacodes.propflow.dto.request.PropertyRequest;
 import com.hoseacodes.propflow.exception.ResourceNotFoundException;
 import com.hoseacodes.propflow.model.Property;
+import com.hoseacodes.propflow.model.Role;
+import com.hoseacodes.propflow.model.User;
 import com.hoseacodes.propflow.repository.PropertyRepository;
 
 /**
- * Property operations.
+ * Property operations, scoped to the authenticated caller.
+ *
+ * <h2>Authorization is part of the query</h2>
+ * Reads use {@code findByIdAndOwner} rather than {@code findById} followed by an
+ * ownership check. The difference matters: a check after the fact protects only
+ * the call sites that remember it, and forgetting one leaks another user's data.
+ * A query that cannot return someone else's row fails safe -- a missing scope
+ * shows up as an empty result, not a breach.
+ *
+ * <h2>Why 404 and not 403 for another user's property</h2>
+ * 403 confirms that a resource with that id exists, which turns the endpoint
+ * into an enumeration oracle: an attacker walks the id space and learns exactly
+ * which ones are real. From outside, "does not exist" and "not yours" must be
+ * indistinguishable. 403 is reserved for a caller who is authenticated but
+ * lacks the required <em>role</em> -- a fact that reveals nothing about data.
  *
  * <h2>Transaction boundaries</h2>
- * The class default is {@code readOnly = true}; writes override it. The
- * boundary belongs here rather than in the controller or the repository:
- * <ul>
- *   <li>A repository method is too small a unit -- an operation that reads then
- *       writes would span two transactions, so a concurrent change between them
- *       is lost.</li>
- *   <li>A controller is too large and is the wrong layer -- transaction scope
- *       would become tied to HTTP, and any non-HTTP caller would get none.</li>
- * </ul>
- * The service method is the unit of work: it maps to one business operation
- * that should entirely succeed or entirely fail.
- *
- * <p>{@code readOnly = true} is not merely documentation. It lets Hibernate
- * skip dirty-checking of loaded entities and flags the intent to the JDBC
- * driver, which matters most on a read-heavy reporting workload like this one.
+ * The class default is {@code readOnly = true}; writes override it. The service
+ * method is the unit of work: a repository call is too small (a read-then-write
+ * would span two transactions and lose a concurrent update), and a controller
+ * is the wrong layer (transaction scope would be tied to HTTP).
  */
 @Service
 @Transactional(readOnly = true)
@@ -40,18 +45,31 @@ public class PropertyService {
         this.propertyRepository = propertyRepository;
     }
 
-    public Page<Property> getAllProperties(Pageable pageable) {
-        return propertyRepository.findAll(pageable);
+    /** Administrators see every property; everyone else sees only their own. */
+    public Page<Property> getAllProperties(User caller, Pageable pageable) {
+        return isAdmin(caller)
+                ? propertyRepository.findAll(pageable)
+                : propertyRepository.findByOwner(caller, pageable);
     }
 
-    public Property getProperty(Long id) {
-        return propertyRepository.findById(id)
+    public Property getProperty(Long id, User caller) {
+        return (isAdmin(caller)
+                ? propertyRepository.findById(id)
+                : propertyRepository.findByIdAndOwner(id, caller))
                 .orElseThrow(() -> new ResourceNotFoundException("Property", id));
     }
 
+    /**
+     * Creates a property owned by the caller.
+     *
+     * <p>Ownership comes from the verified principal. {@code PropertyRequest}
+     * has no owner field at all, so there is nothing for a client to set --
+     * which is a stronger guarantee than accepting the field and ignoring it.
+     */
     @Transactional
-    public Property createProperty(PropertyRequest request) {
+    public Property createProperty(PropertyRequest request, User caller) {
         Property property = new Property();
+        property.setOwner(caller);
         apply(request, property);
         return propertyRepository.save(property);
     }
@@ -60,27 +78,36 @@ public class PropertyService {
      * Full replacement of a property's mutable fields.
      *
      * <p>The entity is loaded inside this transaction and mutated, so Hibernate
-     * dirty-checking issues the UPDATE at flush. Note the alternative that is
-     * deliberately avoided: constructing a detached entity from the request and
-     * calling {@code save()} would write nulls over every field the request did
-     * not carry -- which is how the old user update endpoint silently erased
-     * data.
+     * dirty-checking issues the UPDATE at flush. Constructing a detached entity
+     * from the request and calling {@code save()} would instead write nulls over
+     * every field the request did not carry.
+     *
+     * <p>Ownership is not reassigned: {@code apply} does not touch it, so a
+     * property cannot be transferred to another account through an update.
      */
     @Transactional
-    public Property updateProperty(Long id, PropertyRequest request) {
-        Property property = getProperty(id);
+    public Property updateProperty(Long id, PropertyRequest request, User caller) {
+        Property property = getProperty(id, caller);
         apply(request, property);
         return property;
     }
 
     @Transactional
-    public void deleteProperty(Long id) {
-        // Check first so a missing property is a 404 rather than the 500 that
-        // deleteById's EmptyResultDataAccessException would have produced.
-        if (!propertyRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Property", id);
-        }
-        propertyRepository.deleteById(id);
+    public void deleteProperty(Long id, User caller) {
+        // Resolved through the scoped read, so deleting someone else's property
+        // is a 404 for the same reason reading it is.
+        Property property = getProperty(id, caller);
+
+        // If transactions reference this property, the ON DELETE RESTRICT
+        // foreign key rejects the delete and the resulting
+        // DataIntegrityViolationException surfaces as 409. That is deliberate:
+        // financial history must not disappear as a side effect of removing a
+        // property.
+        propertyRepository.delete(property);
+    }
+
+    private static boolean isAdmin(User user) {
+        return user != null && user.getRole() == Role.ADMIN;
     }
 
     private static void apply(PropertyRequest request, Property property) {

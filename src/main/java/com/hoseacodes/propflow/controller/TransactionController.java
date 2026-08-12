@@ -28,6 +28,17 @@ import jakarta.validation.Valid;
 
 /**
  * Transaction endpoints.
+ *
+ * <p>Every read is scoped to the authenticated caller in the service layer, so
+ * a transaction belonging to another account is reported as 404 rather than
+ * 403 -- 403 would confirm the id exists and let an attacker enumerate.
+ *
+ * <h2>A removed endpoint</h2>
+ * {@code GET /api/transactions/user/{userId}} is gone. Once every listing is
+ * scoped to the caller, it is redundant for its own data and an
+ * insecure-direct-object-reference for anyone else's: the user id came from the
+ * path, so it was an invitation to read another account's financial records by
+ * changing a number. Administrators can filter by owner through search.
  */
 @RestController
 @RequestMapping("/api/transactions")
@@ -42,45 +53,42 @@ public class TransactionController {
     @GetMapping
     public ResponseEntity<PagedResponse<TransactionSummaryResponse>> getAll(
             @PageableDefault(size = 20, sort = "date", direction = Sort.Direction.DESC)
-            Pageable pageable) {
-        return ResponseEntity.ok(transactionService.getAll(pageable));
+            Pageable pageable,
+            @AuthenticationPrincipal User principal) {
+        return ResponseEntity.ok(transactionService.getAll(principal, pageable));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<TransactionResponse> getById(@PathVariable Long id) {
-        return ResponseEntity.ok(transactionService.getById(id));
-    }
-
-    @GetMapping("/user/{userId}")
-    public ResponseEntity<PagedResponse<TransactionSummaryResponse>> getByUserId(
-            @PathVariable String userId,
-            @PageableDefault(size = 20, sort = "date", direction = Sort.Direction.DESC)
-            Pageable pageable) {
-        return ResponseEntity.ok(transactionService.getByUserId(userId, pageable));
+    public ResponseEntity<TransactionResponse> getById(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User principal) {
+        return ResponseEntity.ok(transactionService.getById(id, principal));
     }
 
     @GetMapping("/property/{propertyId}")
     public ResponseEntity<PagedResponse<TransactionSummaryResponse>> getByPropertyId(
             @PathVariable Long propertyId,
             @PageableDefault(size = 20, sort = "date", direction = Sort.Direction.DESC)
-            Pageable pageable) {
-        return ResponseEntity.ok(transactionService.getByPropertyId(propertyId, pageable));
+            Pageable pageable,
+            @AuthenticationPrincipal User principal) {
+        return ResponseEntity.ok(
+                transactionService.getByPropertyId(propertyId, principal, pageable));
     }
 
     /**
      * Records a transaction against the authenticated user.
      *
-     * <p>The owner comes from the verified token, not the request body. Taking
-     * it from the body would let any caller file a transaction into someone
-     * else's books.
+     * <p>The owner comes from the verified token, and the referenced property is
+     * resolved through an owner-scoped lookup -- so a caller can neither file a
+     * transaction into someone else's books nor attach one to a property they do
+     * not own.
      */
     @PostMapping
     public ResponseEntity<TransactionResponse> create(
             @Valid @RequestBody TransactionRequest request,
             @AuthenticationPrincipal User principal) {
 
-        TransactionResponse created =
-                transactionService.create(request, String.valueOf(principal.getId()));
+        TransactionResponse created = transactionService.create(request, principal);
 
         return ResponseEntity
                 .created(URI.create("/api/transactions/" + created.id()))
@@ -90,18 +98,21 @@ public class TransactionController {
     @PutMapping("/{id}")
     public ResponseEntity<TransactionResponse> update(
             @PathVariable Long id,
-            @Valid @RequestBody TransactionRequest request) {
-        return ResponseEntity.ok(transactionService.update(id, request));
+            @Valid @RequestBody TransactionRequest request,
+            @AuthenticationPrincipal User principal) {
+        return ResponseEntity.ok(transactionService.update(id, request, principal));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        transactionService.delete(id);
+    public ResponseEntity<Void> delete(
+            @PathVariable Long id,
+            @AuthenticationPrincipal User principal) {
+        transactionService.delete(id, principal);
         return ResponseEntity.noContent().build();
     }
 
     /**
-     * Filtered search.
+     * Filtered search, scoped to the caller.
      *
      * <p>POST is used for a read, which is a deliberate exception to REST
      * convention rather than an oversight. The filter has sixteen optional
@@ -112,7 +123,8 @@ public class TransactionController {
      */
     @PostMapping("/search")
     public ResponseEntity<PagedResponse<TransactionSummaryResponse>> search(
-            @Valid @RequestBody TransactionSearchRequest request) {
-        return ResponseEntity.ok(transactionService.search(request));
+            @Valid @RequestBody TransactionSearchRequest request,
+            @AuthenticationPrincipal User principal) {
+        return ResponseEntity.ok(transactionService.search(request, principal));
     }
 }

@@ -44,9 +44,7 @@ class AuthApiIT extends AbstractIntegrationTest {
 
     @BeforeEach
     void resetUsers() {
-        jdbc.update("DELETE FROM transaction_tags");
-        jdbc.update("DELETE FROM transactions");
-        userRepository.deleteAll();
+        resetDatabase();
     }
 
     private String json(Object value) throws Exception {
@@ -304,7 +302,7 @@ class AuthApiIT extends AbstractIntegrationTest {
             mockMvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, token))
                     .andExpect(status().isOk());
 
-            userRepository.deleteAll();
+            resetDatabase();
 
             // The token is still cryptographically valid and unexpired. It stops
             // working only because the filter reloads the principal from the

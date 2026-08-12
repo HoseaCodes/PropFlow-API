@@ -44,7 +44,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
 
     @BeforeEach
     void resetProperties() throws Exception {
-        propertyRepository.deleteAll();
+        resetDatabase();
         auth = registerAndSignIn("property-owner-" + System.nanoTime());
     }
 

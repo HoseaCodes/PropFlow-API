@@ -18,6 +18,8 @@ import com.hoseacodes.propflow.dto.response.TransactionSummaryResponse;
 import com.hoseacodes.propflow.exception.BusinessRuleViolationException;
 import com.hoseacodes.propflow.exception.ResourceNotFoundException;
 import com.hoseacodes.propflow.model.Property;
+import com.hoseacodes.propflow.model.Role;
+import com.hoseacodes.propflow.model.User;
 import com.hoseacodes.propflow.model.transactions.Transaction;
 import com.hoseacodes.propflow.model.transactions.TransactionCategory;
 import com.hoseacodes.propflow.repository.PropertyRepository;
@@ -53,26 +55,43 @@ public class TransactionService {
         this.propertyRepository = propertyRepository;
     }
 
-    public PagedResponse<TransactionSummaryResponse> getAll(Pageable pageable) {
-        return PagedResponse.from(
-                transactionRepository.findAll(pageable), TransactionSummaryResponse::from);
+    /**
+     * The ownership predicate applied to every read.
+     *
+     * <p>Returns {@code null} for an administrator, and {@code Specification.allOf}
+     * skips nulls -- so the admin bypass exists in exactly one place instead of
+     * being re-expressed as an {@code if} at every call site.
+     */
+    private static Specification<Transaction> scopedTo(User caller) {
+        return isAdmin(caller) ? null : TransactionSpecifications.ownedBy(caller.getId());
     }
 
-    public TransactionResponse getById(Long id) {
-        return TransactionResponse.from(load(id));
+    private static boolean isAdmin(User user) {
+        return user != null && user.getRole() == Role.ADMIN;
     }
 
-    public PagedResponse<TransactionSummaryResponse> getByUserId(String userId, Pageable pageable) {
-        return PagedResponse.from(
-                transactionRepository.findByUserId(userId, pageable),
-                TransactionSummaryResponse::from);
+    public PagedResponse<TransactionSummaryResponse> getAll(User caller, Pageable pageable) {
+        Page<Transaction> page = transactionRepository.findAll(
+                Specification.allOf(scopedTo(caller)), pageable);
+        return PagedResponse.from(page, TransactionSummaryResponse::from);
+    }
+
+    public TransactionResponse getById(Long id, User caller) {
+        // The ownership predicate is part of the lookup, so another user's
+        // transaction is simply not found -- indistinguishable from one that
+        // does not exist.
+        Transaction transaction = transactionRepository.findOne(Specification.allOf(
+                        scopedTo(caller), TransactionSpecifications.hasId(id)))
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction", id));
+        return TransactionResponse.from(transaction);
     }
 
     public PagedResponse<TransactionSummaryResponse> getByPropertyId(Long propertyId,
+                                                                     User caller,
                                                                      Pageable pageable) {
-        return PagedResponse.from(
-                transactionRepository.findByPropertyId(propertyId, pageable),
-                TransactionSummaryResponse::from);
+        Page<Transaction> page = transactionRepository.findAll(Specification.allOf(
+                scopedTo(caller), TransactionSpecifications.forProperty(propertyId)), pageable);
+        return PagedResponse.from(page, TransactionSummaryResponse::from);
     }
 
     /**
@@ -85,14 +104,13 @@ public class TransactionService {
      * selected instead. It compiled, returned a well-formed page, and ignored
      * every filter the caller sent.
      */
-    public PagedResponse<TransactionSummaryResponse> search(TransactionSearchRequest request) {
-        // NOTE: no owner predicate yet. Search currently spans every user's
-        // transactions, because no ownership edge exists in the schema. The
-        // filter is deliberately NOT exposed on the request type -- scoping
-        // must come from the authenticated principal, never from client input,
-        // or it is a filter rather than a control. Added with the ownership
-        // migration.
+    public PagedResponse<TransactionSummaryResponse> search(TransactionSearchRequest request,
+                                                            User caller) {
+        // The ownership scope is composed in first, from the principal. It is
+        // deliberately absent from TransactionSearchRequest: a scope a client
+        // can supply is a filter, and a filter can be omitted.
         Specification<Transaction> spec = Specification.allOf(
+                scopedTo(caller),
                 TransactionSpecifications.forProperty(request.propertyId()),
                 TransactionSpecifications.dateFrom(request.startDate()),
                 TransactionSpecifications.dateTo(request.endDate()),
@@ -114,10 +132,10 @@ public class TransactionService {
     }
 
     @Transactional
-    public TransactionResponse create(TransactionRequest request, String userId) {
+    public TransactionResponse create(TransactionRequest request, User caller) {
         Transaction transaction = new Transaction();
-        transaction.setUserId(userId);
-        applyRequest(request, transaction);
+        transaction.setUser(caller);
+        applyRequest(request, transaction, caller);
         return TransactionResponse.from(transactionRepository.save(transaction));
     }
 
@@ -135,24 +153,24 @@ public class TransactionService {
      * against a concurrent writer.
      */
     @Transactional
-    public TransactionResponse update(Long id, TransactionRequest request) {
-        Transaction transaction = load(id);
-        applyRequest(request, transaction);
+    public TransactionResponse update(Long id, TransactionRequest request, User caller) {
+        Transaction transaction = load(id, caller);
+        applyRequest(request, transaction, caller);
         return TransactionResponse.from(transaction);
     }
 
     @Transactional
-    public void delete(Long id) {
-        if (!transactionRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Transaction", id);
-        }
-        transactionRepository.deleteById(id);
+    public void delete(Long id, User caller) {
+        // Loaded through the scoped query rather than existsById-then-delete:
+        // that sequence is a check-then-act race, and it ignored ownership.
+        transactionRepository.delete(load(id, caller));
     }
 
     // ------------------------------------------------------------------
 
-    private Transaction load(Long id) {
-        return transactionRepository.findById(id)
+    private Transaction load(Long id, User caller) {
+        return transactionRepository.findOne(Specification.allOf(
+                        scopedTo(caller), TransactionSpecifications.hasId(id)))
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction", id));
     }
 
@@ -160,7 +178,7 @@ public class TransactionService {
      * Copies request fields onto an entity and enforces the domain rules that
      * span more than one field.
      */
-    private void applyRequest(TransactionRequest request, Transaction transaction) {
+    private void applyRequest(TransactionRequest request, Transaction transaction, User caller) {
         // The rule TransactionCategory.isValidForType has always encoded but
         // that nothing ever called: an INCOME transaction categorised as
         // MORTGAGE would inflate reported revenue, and every field is
@@ -171,10 +189,16 @@ public class TransactionService {
                             .formatted(request.category(), request.type()));
         }
 
-        Property property = propertyRepository.findById(request.propertyId())
+        // Resolved through the OWNER-SCOPED lookup. Without this, an
+        // authenticated user could file transactions against someone else's
+        // property -- writing into another account's books even though they
+        // could not read them.
+        Property property = (isAdmin(caller)
+                ? propertyRepository.findById(request.propertyId())
+                : propertyRepository.findByIdAndOwner(request.propertyId(), caller))
                 .orElseThrow(() -> new ResourceNotFoundException("Property", request.propertyId()));
 
-        transaction.setPropertyId(property.getId());
+        transaction.setProperty(property);
         // Resolved from the property, never taken from the request: it is a
         // point-in-time snapshot for the financial record, so a later rename
         // does not rewrite history.

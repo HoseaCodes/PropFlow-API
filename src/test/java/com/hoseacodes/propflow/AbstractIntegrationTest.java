@@ -8,6 +8,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -84,7 +85,29 @@ public abstract class AbstractIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     protected static final String TEST_PASSWORD = "correct-horse-battery";
+
+    /**
+     * Clears all application data, children before parents.
+     *
+     * <p>The order is mandatory now that real foreign keys exist with
+     * {@code ON DELETE RESTRICT}: deleting users while properties still
+     * reference them is rejected by the database. That the tests have to respect
+     * this is the point -- it is the same protection that stops a stray delete
+     * from taking financial history with it in production.
+     */
+    protected void resetDatabase() {
+        jdbcTemplate.update("DELETE FROM transaction_tags");
+        jdbcTemplate.update("DELETE FROM transaction_warranties");
+        jdbcTemplate.update("DELETE FROM transaction_metadata");
+        jdbcTemplate.update("DELETE FROM transactions");
+        jdbcTemplate.update("DELETE FROM bookings");
+        jdbcTemplate.update("DELETE FROM properties");
+        jdbcTemplate.update("DELETE FROM users");
+    }
 
     /**
      * Registers an account and returns a usable {@code Authorization} header
