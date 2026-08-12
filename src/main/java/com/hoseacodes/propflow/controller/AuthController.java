@@ -1,78 +1,92 @@
 package com.hoseacodes.propflow.controller;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
+import java.net.URI;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.AuthenticationException;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.hoseacodes.propflow.model.SignInRequest;
+import com.hoseacodes.propflow.dto.request.SignInRequest;
+import com.hoseacodes.propflow.dto.request.SignUpRequest;
+import com.hoseacodes.propflow.dto.response.AuthResponse;
+import com.hoseacodes.propflow.dto.response.UserResponse;
 import com.hoseacodes.propflow.model.User;
-import com.hoseacodes.propflow.repository.UserRepository;
+import com.hoseacodes.propflow.security.JwtService;
+import com.hoseacodes.propflow.service.UserService;
 
+import jakarta.validation.Valid;
+
+/**
+ * Registration and sign-in. The only endpoints reachable without a token.
+ */
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "*")
 public class AuthController {
 
-    private AuthenticationManager authenticationManager;
+    private final AuthenticationManager authenticationManager;
+    private final UserService userService;
+    private final JwtService jwtService;
 
-    private final UserRepository userRepository;
-
-    private final PasswordEncoder passwordEncoder;
-
-    @Autowired
-    public AuthController(AuthenticationManager authenticationManager, UserRepository userRepository,
-            PasswordEncoder passwordEncoder) {
+    public AuthController(AuthenticationManager authenticationManager,
+                          UserService userService,
+                          JwtService jwtService) {
         this.authenticationManager = authenticationManager;
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
+        this.userService = userService;
+        this.jwtService = jwtService;
     }
-    
-    @PostMapping("/signin")
-    public ResponseEntity<?> signIn(@RequestBody SignInRequest signInRequest) {
-        try {
-            Authentication authentication = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(signInRequest.getUsername(), signInRequest.getPassword()));
 
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            return ResponseEntity.ok("User signed in successfully");
-        } catch (AuthenticationException e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication failed");
-        }
-    }
-    
+    /**
+     * Registers an account.
+     *
+     * <p>Returns 201 with a {@code Location} header, and a body containing no
+     * credentials. The previous implementation returned the saved {@code User}
+     * entity, which serialised the BCrypt hash straight back to the caller.
+     *
+     * <p>No token is issued here. Registration and authentication are separate
+     * concerns, and keeping them separate means the sign-in path -- the one that
+     * has to resist credential stuffing -- has exactly one implementation.
+     */
     @PostMapping("/signup")
-    public ResponseEntity<?> saveUser(@RequestBody User user) {
-        try {
-            // Validate input
-            if (userRepository.findByEmail(user.getEmail()) != null) {
-                return ResponseEntity.badRequest().body("Email already exists");
-            }
+    public ResponseEntity<UserResponse> signUp(@Valid @RequestBody SignUpRequest request) {
+        User created = userService.register(request);
+        UserResponse body = UserResponse.from(created);
 
-            user.setId(null);
+        return ResponseEntity
+                .created(URI.create("/api/users/" + created.getId()))
+                .body(body);
+    }
 
-            // Encode password
-            user.setPassword(passwordEncoder.encode(user.getPassword()));
+    /**
+     * Exchanges credentials for a bearer token.
+     *
+     * <p>{@code AuthenticationManager.authenticate} delegates to
+     * {@code DaoAuthenticationProvider}, which loads the user and compares the
+     * submitted password against the stored BCrypt hash using the encoder's
+     * constant-time matcher. On failure it throws {@code AuthenticationException},
+     * which the exception handler maps to a 401 carrying no detail about
+     * <em>why</em> -- distinguishing "no such user" from "wrong password" would
+     * let an attacker enumerate accounts.
+     *
+     * <p>Note what is deliberately absent: the previous implementation stored
+     * the result in {@code SecurityContextHolder}, which is thread-local and
+     * cleared at the end of the request, and returned a plain string. The client
+     * received nothing it could present on a subsequent call. The token below is
+     * that missing piece.
+     */
+    @PostMapping("/signin")
+    public ResponseEntity<AuthResponse> signIn(@Valid @RequestBody SignInRequest request) {
+        Authentication authentication = authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(request.username(), request.password()));
 
-            // Set version to null to ensure JPA handles versioning
-            user.setVersion(null);
-            
-            // Save and return user
-            User savedUser = userRepository.save(user);
-            return ResponseEntity.ok(savedUser);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Signup failed: " + e.getMessage());
-        }
+        User user = (User) authentication.getPrincipal();
+        String token = jwtService.generateToken(user);
+
+        return ResponseEntity.ok(AuthResponse.bearer(
+                token, jwtService.getExpirationSeconds(), UserResponse.from(user)));
     }
 }

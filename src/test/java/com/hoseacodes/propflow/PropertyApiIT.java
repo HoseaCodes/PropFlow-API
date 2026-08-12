@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
 import com.hoseacodes.propflow.model.Property;
@@ -34,9 +35,13 @@ class PropertyApiIT extends AbstractIntegrationTest {
     @Autowired
     private PropertyRepository propertyRepository;
 
+    /** Every property endpoint now requires a bearer token. */
+    private String auth;
+
     @BeforeEach
-    void resetProperties() {
+    void resetProperties() throws Exception {
         propertyRepository.deleteAll();
+        auth = registerAndSignIn("property-owner-" + System.nanoTime());
     }
 
     private static Property sampleProperty() {
@@ -56,7 +61,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("a created property is persisted and readable by id")
     void createThenReadProperty() throws Exception {
-        String created = mockMvc.perform(post("/api/properties")
+        String created = mockMvc.perform(post("/api/properties").header(HttpHeaders.AUTHORIZATION, auth)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(sampleProperty())))
                 .andExpect(status().isOk())
@@ -66,7 +71,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
 
         Long id = objectMapper.readTree(created).get("id").asLong();
 
-        mockMvc.perform(get("/api/properties/{id}", id))
+        mockMvc.perform(get("/api/properties/{id}", id).header(HttpHeaders.AUTHORIZATION, auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(id))
                 .andExpect(jsonPath("$.strPermitNumber").value("STR-2024-0142"));
@@ -82,7 +87,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
         Property property = sampleProperty();
         property.setBasePrice(new BigDecimal("1234.56"));
 
-        String created = mockMvc.perform(post("/api/properties")
+        String created = mockMvc.perform(post("/api/properties").header(HttpHeaders.AUTHORIZATION, auth)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(property)))
                 .andExpect(status().isOk())
@@ -106,7 +111,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
         propertyRepository.save(sampleProperty());
         propertyRepository.save(sampleProperty());
 
-        mockMvc.perform(get("/api/properties"))
+        mockMvc.perform(get("/api/properties").header(HttpHeaders.AUTHORIZATION, auth))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2));
     }
@@ -120,7 +125,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
         update.setName("Bishop Arts Bungalow - Renovated");
         update.setMaxGuests(6);
 
-        mockMvc.perform(put("/api/properties/{id}", id)
+        mockMvc.perform(put("/api/properties/{id}", id).header(HttpHeaders.AUTHORIZATION, auth)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(update)))
                 .andExpect(status().isOk())
@@ -138,7 +143,7 @@ class PropertyApiIT extends AbstractIntegrationTest {
     void deleteProperty() throws Exception {
         Long id = propertyRepository.save(sampleProperty()).getId();
 
-        mockMvc.perform(delete("/api/properties/{id}", id))
+        mockMvc.perform(delete("/api/properties/{id}", id).header(HttpHeaders.AUTHORIZATION, auth))
                 .andExpect(status().isOk());
 
         assertThat(propertyRepository.findById(id)).isEmpty();

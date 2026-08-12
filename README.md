@@ -4,9 +4,9 @@ A REST API for managing short-term rental properties and their financial transac
 
 > **Status: portfolio project, actively being hardened.**
 >
-> This repository is mid-way through a documented engineering review. A full audit of its current weaknesses is published in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md), and the remediation plan is in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md).
+> This repository is mid-way through a documented engineering review. A full audit of its original weaknesses is published in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md), and the remediation plan is in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md).
 >
-> **The API is currently unauthenticated** and should not be exposed to the internet. Authentication and authorization are the next items of work. This README documents only what the code actually does today; capabilities are added here as they land.
+> This README documents only what the code actually does today; capabilities are added here as they land.
 
 ---
 
@@ -14,7 +14,7 @@ A REST API for managing short-term rental properties and their financial transac
 
 - Java 17
 - Spring Boot 3.4.0
-- Spring Security (password hashing; endpoint protection **not yet** implemented)
+- Spring Security 6 with stateless JWT bearer authentication
 - Spring Data JPA / Hibernate 6
 - PostgreSQL 15
 - Maven (wrapper included)
@@ -34,6 +34,7 @@ erDiagram
         string password
         string first_name
         string last_name
+        string role "USER | ADMIN"
         bigint version
     }
     PROPERTY {
@@ -64,7 +65,7 @@ erDiagram
 
 The dashed relationships are deliberate in this diagram: `Transaction` currently references users and properties by bare scalar columns with **no foreign key constraints**. This is a known defect (audit finding **H10**), not a design decision, and is scheduled for correction.
 
-`Booking`, `Expense`, and `CleaningChecklist` entities also exist in the codebase but have no repository, service, or API. They are unused.
+A `Booking` entity and table also exist, with a proper foreign key to `properties`, but no API is exposed for it yet. The unused `Expense` and `CleaningChecklist` entities were removed — `Expense` duplicated `Transaction`, and neither had any endpoint.
 
 ---
 
@@ -72,11 +73,21 @@ The dashed relationships are deliberate in this diagram: `Transaction` currently
 
 Base URL: `http://localhost:8080`
 
-### Authentication
+Every endpoint requires a bearer token except `POST /api/auth/signup`, `POST /api/auth/signin`, and the OpenAPI paths. Unauthenticated requests receive `401`; authenticated requests lacking the required role receive `403`. Both are RFC 7807 `application/problem+json`.
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/signin \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"you","password":"your-password"}' | jq -r .accessToken)
+
+curl http://localhost:8080/api/properties -H "Authorization: Bearer $TOKEN"
+```
+
+### Authentication (public)
 | Method | Path | Notes |
 |---|---|---|
-| `POST` | `/api/auth/signup` | Creates a user; password is BCrypt-hashed |
-| `POST` | `/api/auth/signin` | Verifies credentials. **Returns no token** — there is currently no way to authenticate a subsequent request. |
+| `POST` | `/api/auth/signup` | Creates a user; BCrypt-hashed password; returns `201` and never returns credentials |
+| `POST` | `/api/auth/signin` | Returns a signed JWT, its type, its lifetime, and the user |
 
 ### Properties
 | Method | Path |
@@ -100,13 +111,14 @@ Base URL: `http://localhost:8080`
 | `POST` | `/api/transactions/search` | ⚠️ Filters are currently ignored — see audit **H2** |
 
 ### Users
-| Method | Path |
-|---|---|
-| `GET` | `/api/users` |
-| `GET` | `/api/users/{id}` |
-| `POST` | `/api/users` | ⚠️ Stores the password **unhashed** — see audit **C3** |
-| `PUT` | `/api/users/{id}` |
-| `DELETE` | `/api/users/{id}` |
+| Method | Path | Required role |
+|---|---|---|
+| `GET` | `/api/users/me` | any authenticated user |
+| `GET` | `/api/users` | `ADMIN` |
+| `GET` | `/api/users/{id}` | `ADMIN` |
+| `DELETE` | `/api/users/{id}` | `ADMIN` |
+
+`POST /api/users` and `PUT /api/users/{id}` were **removed**. The first persisted passwords without hashing and duplicated signup; the second bound the JPA entity directly and saved it under the path's id with no ownership check, so any caller could rewrite any account's credentials. Safe replacements arrive with the DTO work.
 
 A Postman collection covering the auth and user endpoints is at [`src/main/resources/postman.json`](src/main/resources/postman.json).
 
@@ -186,10 +198,13 @@ All configuration is supplied by environment variables. See [`.env.example`](.en
 | `DB_USERNAME` | `propflow` | Database user |
 | `DB_PASSWORD` | `propflow` | Database password |
 | `DB_HOST_PORT` | `5432` | Host port for the Compose database |
+| `JWT_SECRET` | **none — required** | HMAC signing key. The application refuses to start without it. Generate with `openssl rand -base64 48`. |
+| `JWT_EXPIRATION` | `1h` | Token lifetime |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200,https://prop-flow-ui.vercel.app` | Allowed browser origins; `*` is rejected |
 | `SPRING_PROFILES_ACTIVE` | `dev` | Active profile |
 | `PORT` | `8080` | HTTP port |
 
-No credential is stored in a tracked file. The defaults above are non-secret values for a local throwaway container.
+No credential is stored in a tracked file. The database defaults above are non-secret values for a local throwaway container. `JWT_SECRET` has **no default at all**: a fallback signing key would let anyone with the source forge a token for any account, so the application fails to start with an actionable message instead.
 
 ---
 
@@ -197,11 +212,11 @@ No credential is stored in a tracked file. The defaults above are non-secret val
 
 Stated plainly, because the repository is a work in progress and unverified claims are worse than none. Full detail with file references is in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md).
 
-- **No authentication or authorization.** Every endpoint is publicly reachable.
-- **No JWT.** Sign-in verifies credentials but issues nothing the client can present.
-- **`POST /api/users` stores passwords in plaintext**, bypassing the hashing used by `/api/auth/signup`.
-- **API responses include the password hash**, because JPA entities are returned directly.
-- **No input validation.** No request body is validated.
+- **No per-row ownership checks yet.** Any authenticated user can read and modify *any* property or transaction. Roles are enforced; resource ownership is not. This is the next piece of work and is the most important remaining gap.
+- **Tokens cannot be revoked before they expire.** This is inherent to stateless JWT. Mitigated by a one-hour default lifetime and by reloading the user from the database on every request, so a deleted account stops authenticating immediately.
+- **No refresh-token flow.** Clients re-authenticate when the token expires.
+- **No rate limiting** on the sign-in endpoint.
+- **Property and transaction payloads are still JPA entities**, so those endpoints remain unvalidated and accept any field the entity exposes. Auth endpoints use validated DTOs.
 - **Transaction search ignores its filters.**
 - **No CI**, no health endpoint, no metrics.
 - **Test coverage is partial.** Properties and the schema are covered end to end; transactions, users, and auth are not yet.
@@ -215,11 +230,13 @@ This project is **not production-ready** and is not deployed anywhere serving re
 
 Tracked in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md):
 
-1. JWT authentication and per-user resource authorization
-2. Testcontainers-backed integration tests against real PostgreSQL
-3. Flyway schema migrations, foreign keys, and targeted indexes
-4. Request/response DTOs, validation, and an RFC 7807 error model
-5. Actuator health endpoints, working Docker Compose, GitHub Actions CI
+1. ~~Flyway schema migrations~~ *(done)*
+2. ~~Testcontainers-backed integration tests against real PostgreSQL~~ *(done)*
+3. ~~JWT authentication and role-based access control~~ *(done)*
+4. Per-user resource ownership and authorization
+5. Request/response DTOs and validation across the remaining endpoints
+6. Foreign keys, targeted indexes, and `BigDecimal` money
+7. Actuator health endpoints, working Docker Compose, GitHub Actions CI
 
 ---
 

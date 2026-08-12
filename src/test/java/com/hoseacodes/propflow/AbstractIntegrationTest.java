@@ -1,15 +1,24 @@
 package com.hoseacodes.propflow;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hoseacodes.propflow.dto.request.SignInRequest;
+import com.hoseacodes.propflow.dto.request.SignUpRequest;
+import com.hoseacodes.propflow.model.Role;
+import com.hoseacodes.propflow.model.User;
+import com.hoseacodes.propflow.repository.UserRepository;
 
 /**
  * Base class for integration tests that exercise the full stack:
@@ -60,4 +69,55 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected ObjectMapper objectMapper;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    protected static final String TEST_PASSWORD = "correct-horse-battery";
+
+    /**
+     * Registers an account and returns a usable {@code Authorization} header
+     * value.
+     *
+     * <p>Deliberately goes through the real HTTP endpoints rather than seeding
+     * a {@code SecurityContext} with {@code @WithMockUser}. A mocked principal
+     * bypasses {@code JwtAuthenticationFilter} entirely, so the tests would
+     * pass even if token parsing were broken -- which is precisely the code
+     * these tests exist to cover.
+     */
+    protected String registerAndSignIn(String username) throws Exception {
+        register(username);
+        return bearerFor(username, TEST_PASSWORD);
+    }
+
+    /** Registers an account and promotes it to ADMIN before signing in. */
+    protected String registerAdminAndSignIn(String username) throws Exception {
+        register(username);
+        User user = userRepository.findByUsernameIgnoringCase(username).orElseThrow();
+        user.setRole(Role.ADMIN);
+        userRepository.saveAndFlush(user);
+        return bearerFor(username, TEST_PASSWORD);
+    }
+
+    protected void register(String username) throws Exception {
+        var body = objectMapper.writeValueAsString(new SignUpRequest(
+                username + "@example.com", username, TEST_PASSWORD, "Test", "User"));
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isCreated());
+    }
+
+    protected String bearerFor(String username, String password) throws Exception {
+        var body = objectMapper.writeValueAsString(new SignInRequest(username, password));
+
+        String response = mockMvc.perform(post("/api/auth/signin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        return "Bearer " + objectMapper.readTree(response).get("accessToken").asText();
+    }
 }

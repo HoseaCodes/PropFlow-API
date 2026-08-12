@@ -2,6 +2,7 @@ package com.hoseacodes.propflow.service;
 
 import com.hoseacodes.propflow.model.transactions.Transaction;
 import com.hoseacodes.propflow.model.transactions.TransactionFilter;
+import com.hoseacodes.propflow.exception.ResourceNotFoundException;
 import com.hoseacodes.propflow.repository.TransactionRepository;
 
 import jakarta.persistence.criteria.Predicate;
@@ -51,7 +52,7 @@ public class TransactionService {
     @Transactional
     public Transaction updateTransaction(Long id, Transaction transaction) {
         if (!repository.existsById(id)) {
-            throw new RuntimeException("Transaction not found with id: " + id);
+            throw new ResourceNotFoundException("Transaction", id);
         }
         transaction.setId(id);
         validateTransaction(transaction);

@@ -1,6 +1,7 @@
 package com.hoseacodes.propflow.service;
 
 import com.hoseacodes.propflow.model.Property;
+import com.hoseacodes.propflow.exception.ResourceNotFoundException;
 import com.hoseacodes.propflow.repository.PropertyRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -17,7 +18,7 @@ public class PropertyService {
     
     public Property getProperty(Long id) {
         return propertyRepository.findById(id)
-            .orElseThrow(() -> new RuntimeException("Property not found"));
+            .orElseThrow(() -> new ResourceNotFoundException("Property", id));
     }
     
     public Property createProperty(Property property) {
