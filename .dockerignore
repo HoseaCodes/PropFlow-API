@@ -5,6 +5,15 @@
 .env.*
 !.env.example
 
+# Untracked local config overrides. .gitignore does NOT keep a file out of the
+# Docker build context -- they are separate mechanisms -- so a stale
+# application-prod.properties sitting on one developer's disk was being copied
+# in by `COPY src ./src` and packaged into the jar, breaking startup for an
+# image that built fine from a clean clone. The same path is how a local file
+# holding real credentials would end up inside a published image.
+src/main/resources/application-local.properties
+src/main/resources/application-prod.properties
+
 .git
 .github
 target/

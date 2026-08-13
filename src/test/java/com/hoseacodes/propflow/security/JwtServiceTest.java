@@ -138,6 +138,26 @@ class JwtServiceTest {
     }
 
     @Test
+    @DisplayName("configuration rejects an unresolved ${...} placeholder")
+    void rejectsUnresolvedPlaceholder() {
+        // Regression test for a real hole. Spring's @ConfigurationProperties
+        // binder ignores unresolvable placeholders, so an unset JWT_SECRET binds
+        // the literal text "${JWT_SECRET}" instead of failing -- and the
+        // application would boot with that as its HMAC signing key, shared by
+        // every deployment that forgot the variable.
+        assertThatThrownBy(() -> new JwtProperties("${JWT_SECRET}", Duration.ofHours(1)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("propflow.jwt.secret is not configured");
+
+        // Long enough to pass the byte-length check, so only the placeholder
+        // detection can reject it. This is the case the length check misses.
+        assertThatThrownBy(() -> new JwtProperties(
+                "${A_VERY_LONG_ENVIRONMENT_VARIABLE_NAME_HERE}", Duration.ofHours(1)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("propflow.jwt.secret is not configured");
+    }
+
+    @Test
     @DisplayName("configuration rejects a secret too short for HS256")
     void rejectsShortSecret() {
         // HS256 requires a 256-bit key. Failing at startup with a clear message

@@ -1,5 +1,7 @@
 # PropFlow API
 
+[![CI](https://github.com/HoseaCodes/PropFlow-API/actions/workflows/ci.yml/badge.svg)](https://github.com/HoseaCodes/PropFlow-API/actions/workflows/ci.yml)
+
 A REST API for managing short-term rental properties and their financial transactions — properties, income and expense records, tax categorisation, and recurring charges.
 
 > **Status: portfolio project, actively being hardened.**
@@ -17,8 +19,13 @@ A REST API for managing short-term rental properties and their financial transac
 - Spring Security 6 with stateless JWT bearer authentication
 - Spring Data JPA / Hibernate 6
 - PostgreSQL 15
+- Flyway (schema migrations)
 - Maven (wrapper included)
 - Docker / Docker Compose
+- Testcontainers (integration tests against real PostgreSQL)
+- Spring Boot Actuator + Micrometer/Prometheus
+- springdoc-openapi (Swagger UI)
+- GitHub Actions
 - Lombok
 
 ---
@@ -206,7 +213,52 @@ You do **not** need `docker compose up -d db` to run the tests; Testcontainers m
 docker compose up --build
 ```
 
-Also starts [Adminer](http://localhost:8082) for browsing the database.
+Starts PostgreSQL, the API, and [Adminer](http://localhost:8082) for browsing the database. The app container waits for the database to report healthy before starting, and has its own healthcheck against the readiness probe.
+
+`JWT_SECRET` has no default: Compose fails with an explanatory message rather than booting with a signing key committed to this repository.
+
+---
+
+## API Documentation
+
+With the application running:
+
+| | |
+|---|---|
+| Swagger UI | <http://localhost:8080/swagger-ui.html> |
+| OpenAPI JSON | <http://localhost:8080/v3/api-docs> |
+
+The spec is generated from the controllers and the validation constraints on the request records, so it cannot drift from the code — which is why endpoint details are not duplicated at length here.
+
+To exercise protected endpoints: sign in via `POST /api/auth/signin`, click **Authorize**, and paste the `accessToken`.
+
+---
+
+## Operations
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `/actuator/health` | public | Aggregate status. `UP`/`DOWN` only for anonymous callers. |
+| `/actuator/health/liveness` | public | Is the process broken beyond recovery? Restart if `DOWN`. |
+| `/actuator/health/readiness` | public | Can it serve traffic? Includes the database check. |
+| `/actuator/prometheus` | `ADMIN` | Metrics scrape endpoint |
+| `/actuator/info` | `ADMIN` | Build information |
+
+**Liveness and readiness are deliberately different.** The database is part of readiness and *not* liveness: during a database outage every instance should stop taking traffic while staying alive. Restarting cannot fix the database, and a restart loop across the fleet turns a recoverable dependency failure into a cold-start stampede when it recovers.
+
+Endpoints that dump configuration or memory (`env`, `beans`, `configprops`, `heapdump`, `threaddump`, `loggers`, `mappings`) are **not exposed at all** — removed from the exposure list rather than merely gated behind a role. An integration test asserts they return 404.
+
+---
+
+## Continuous Integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `master`:
+
+1. `./mvnw verify` — compile, unit tests, integration tests against real PostgreSQL via Testcontainers, package
+2. Publish a test report and upload results on failure
+3. Build the Docker image and assert it **refuses to start without `JWT_SECRET`**
+
+The GitHub-hosted runner provides a Docker daemon, so Testcontainers needs no additional setup — the same mechanism runs locally and in CI.
 
 ---
 

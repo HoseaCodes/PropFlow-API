@@ -25,7 +25,21 @@ public record JwtProperties(String secret, Duration expiration) {
     private static final int MINIMUM_SECRET_BYTES = 32;
 
     public JwtProperties {
-        if (secret == null || secret.isBlank()) {
+        // An unresolved placeholder is treated as "not configured".
+        //
+        // This is not defensive padding -- it closes a real hole. Spring's
+        // @ConfigurationProperties binder resolves placeholders with
+        // ignoreUnresolvablePlaceholders=true, so `propflow.jwt.secret=${JWT_SECRET}`
+        // with JWT_SECRET unset does NOT fail: it binds the literal 13-character
+        // string "${JWT_SECRET}" and the application starts with that as its
+        // HMAC key. Every deployment that forgot the variable would share one
+        // publicly-known signing secret, and any of them could mint a valid
+        // token for any user of the others.
+        //
+        // The length check below happened to catch this only because
+        // "${JWT_SECRET}" is shorter than 32 bytes. A longer variable name would
+        // have sailed through.
+        if (secret == null || secret.isBlank() || secret.startsWith("${")) {
             throw new IllegalStateException("""
                     propflow.jwt.secret is not configured.
 

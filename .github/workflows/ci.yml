@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# A new push to the same branch cancels the in-progress run. Without this,
+# pushing three times in a minute queues three full builds and the first two
+# are already irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    # Integration tests start a PostgreSQL container via Testcontainers. The
+    # GitHub-hosted Ubuntu runner ships a working Docker daemon, so no service
+    # container or extra setup is needed -- Testcontainers manages the database
+    # itself, exactly as it does on a developer machine. That is the point of
+    # choosing it: one mechanism, identical everywhere.
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          # Caches ~/.m2 keyed on the pom, so dependency resolution is only paid
+          # for when dependencies actually change.
+          cache: maven
+
+      # `verify` runs Surefire (unit) and then Failsafe (integration), so this
+      # single command is the whole gate: compile, unit test, integration test
+      # against real PostgreSQL, and package. Nothing merges without it.
+      - name: Build, test, and package
+        run: ./mvnw -B --no-transfer-progress verify
+
+      - name: Publish test report
+        # Runs even when tests fail -- that is precisely when the report matters.
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: '**/target/*-reports/TEST-*.xml'
+          include_passed: false
+          detailed_summary: true
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            target/surefire-reports/
+            target/failsafe-reports/
+          retention-days: 7
+
+      - name: Upload packaged jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: propflow-api-jar
+          path: target/*.jar
+          retention-days: 7
+
+  docker:
+    name: Verify container image builds
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Built but deliberately not pushed. There is no registry to publish to
+      # and no deployment target; the value here is proving the Dockerfile still
+      # works, which is a real thing to break and an easy one to miss.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: propflow-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the image starts and refuses to run without a signing key
+        run: |
+          set -euo pipefail
+
+          # The application must fail closed when JWT_SECRET is absent: a
+          # default signing key would let anyone with the source forge tokens.
+          # Asserting the failure keeps that guarantee from silently regressing.
+          if docker run --rm propflow-api:ci > startup.log 2>&1; then
+            echo "FAIL: container started without JWT_SECRET"
+            exit 1
+          fi
+
+          if ! grep -q "propflow.jwt.secret is not configured" startup.log; then
+            echo "FAIL: expected a clear message about the missing signing key"
+            cat startup.log
+            exit 1
+          fi
+
+          echo "OK: image refuses to start without JWT_SECRET"

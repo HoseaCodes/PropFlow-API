@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -56,6 +57,13 @@ import jakarta.persistence.EntityManagerFactory;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+// Spring Boot switches metrics and tracing auto-configuration OFF inside tests
+// by default, so /actuator/prometheus would return 404 no matter how it is
+// configured. Re-enabling it here means the observability endpoints are covered
+// by the same suite as everything else, rather than being verified only by
+// hand. Declared on the base class so every integration test shares one Spring
+// context; putting it on a single subclass would fork a second one.
+@AutoConfigureObservability
 @ActiveProfiles("test")
 public abstract class AbstractIntegrationTest {
 

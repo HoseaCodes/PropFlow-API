@@ -19,6 +19,7 @@ import com.hoseacodes.propflow.model.User;
 import com.hoseacodes.propflow.security.JwtService;
 import com.hoseacodes.propflow.service.UserService;
 
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import jakarta.validation.Valid;
 
 /**
@@ -26,6 +27,11 @@ import jakarta.validation.Valid;
  */
 @RestController
 @RequestMapping("/api/auth")
+// The OpenAPI document applies a bearer requirement globally, matching the
+// security chain's deny-by-default posture. These two endpoints are the
+// exception, so the requirement is cleared here -- otherwise Swagger UI would
+// send an Authorization header to the endpoint that issues the token.
+@SecurityRequirements
 public class AuthController {
 
     private final AuthenticationManager authenticationManager;

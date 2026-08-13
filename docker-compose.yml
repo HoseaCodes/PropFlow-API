@@ -23,6 +23,13 @@ services:
       DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-propflow}
       DB_USERNAME: ${POSTGRES_USER:-propflow}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-propflow}
+      # No default. The application refuses to start without a signing key, and
+      # Compose will fail the same way rather than silently booting with one
+      # baked into this file -- a committed key is a key everyone has.
+      # Set JWT_SECRET in .env; generate with: openssl rand -base64 48
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env - generate with openssl rand -base64 48}"
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-1h}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200}
     depends_on:
       db:
         # Wait for PostgreSQL to accept connections, not merely for the
@@ -32,9 +39,21 @@ services:
     networks:
       - propflow
     restart: unless-stopped
-    # NOTE: no healthcheck yet. The previous one probed /actuator/health, but
-    # Actuator is not a dependency and the port was wrong, so the container was
-    # permanently "unhealthy". A working probe is added alongside Actuator.
+    healthcheck:
+      # Probes the readiness group, not plain /actuator/health: readiness
+      # includes the database check, so the container is only reported healthy
+      # once it can actually serve requests.
+      #
+      # curl is installed explicitly in the runtime image. The previous
+      # healthcheck assumed it was present in a base image that did not have
+      # it -- one of three reasons it could never have passed.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # Generous, because Flyway migrations run during startup on a cold
+      # database. Failures before this elapses do not count against `retries`.
+      start_period: 60s
 
   db:
     image: postgres:15-alpine
@@ -66,8 +85,10 @@ services:
     container_name: propflow-adminer
     ports:
       # Adminer listens on 8080 inside the container. The previous mapping was
-      # 8082:8082, so the service was unreachable.
-      - "8082:8080"
+      # 8082:8082, so the service was unreachable. The host side is
+      # configurable for the same reason as the database port: 8082 is a
+      # popular choice and may already be taken.
+      - "${ADMINER_HOST_PORT:-8082}:8080"
     depends_on:
       - db
     networks:

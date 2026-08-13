@@ -30,6 +30,7 @@
 		<java.version>17</java.version>
 		<!-- Not managed by the Spring Boot BOM, so the version is pinned here. -->
 		<jjwt.version>0.12.6</jjwt.version>
+		<springdoc.version>2.7.0</springdoc.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -90,10 +91,26 @@
 			<artifactId>lombok</artifactId>
 			<optional>true</optional>
 		</dependency>
+		<!-- Health, metrics, and build info. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<!-- Prometheus scrape endpoint. Micrometer is the facade; this is the
+		     registry that renders /actuator/prometheus. -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+		<!-- OpenAPI. The previous dependency was springdoc-openapi-ui 1.7.0, a
+		     Spring Boot 2 / javax.servlet artifact: on Boot 3 its
+		     autoconfiguration never activates, so /swagger-ui.html served
+		     nothing. The 2.x line is the Boot 3 / jakarta equivalent. -->
 		<dependency>
 			<groupId>org.springdoc</groupId>
-			<artifactId>springdoc-openapi-ui</artifactId>
-			<version>1.7.0</version>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>${springdoc.version}</version>
 		</dependency>
 		<!-- Spring Boot Starter Test for unit testing -->
 		<dependency>

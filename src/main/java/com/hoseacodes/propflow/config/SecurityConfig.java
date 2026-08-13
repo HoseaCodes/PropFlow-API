@@ -39,7 +39,13 @@ import com.hoseacodes.propflow.security.SecurityProblemResponder;
 @EnableConfigurationProperties({JwtProperties.class, CorsProperties.class})
 public class SecurityConfig {
 
-    /** Paths that must remain reachable without a token. */
+    /**
+     * Paths that must remain reachable without a token.
+     *
+     * <p>Health probes are here because a load balancer or orchestrator cannot
+     * hold a credential. They return only UP or DOWN to an anonymous caller --
+     * component detail requires ADMIN, configured in application.properties.
+     */
     private static final String[] PUBLIC_PATHS = {
             "/api/auth/signin",
             "/api/auth/signup",
@@ -94,6 +100,14 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                         .requestMatchers(PUBLIC_PATHS).permitAll()
+
+                        // Everything else under /actuator -- notably the
+                        // Prometheus scrape endpoint, which exposes request
+                        // paths, timings, and JVM internals. In a real
+                        // deployment this would additionally be bound to an
+                        // internal-only port or network rather than relying on
+                        // authentication alone.
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
 
                         // Ordering matters: the first match wins, so the
                         // self-service route must precede the admin rule that
