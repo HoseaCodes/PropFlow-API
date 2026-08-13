@@ -1,3 +1,7 @@
+---
+search:
+  exclude: true
+---
 # PropFlow API — Portfolio Hardening Plan
 
 > ## Status: P0 and P1 complete; P2 partially complete

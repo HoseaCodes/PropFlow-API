@@ -1,3 +1,7 @@
+---
+search:
+  exclude: true
+---
 # PropFlow API — Engineering Audit
 
 > ## ⚠️ HISTORICAL DOCUMENT

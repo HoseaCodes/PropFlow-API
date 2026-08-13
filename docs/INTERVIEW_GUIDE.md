@@ -1,3 +1,7 @@
+---
+search:
+  exclude: true
+---
 # PropFlow — Interview Preparation Guide
 
 **This document is for me, not for reviewers.** It exists so I can defend every
