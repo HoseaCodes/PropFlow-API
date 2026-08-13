@@ -4,7 +4,10 @@
 [![Java 17](https://img.shields.io/badge/Java-17-orange)](https://openjdk.org/projects/jdk/17/)
 [![Spring Boot 3.4](https://img.shields.io/badge/Spring%20Boot-3.4-green)](https://spring.io/projects/spring-boot)
 [![PostgreSQL 15](https://img.shields.io/badge/PostgreSQL-15-blue)](https://www.postgresql.org/)
+[![Docs](https://github.com/HoseaCodes/PropFlow-API/actions/workflows/docs.yml/badge.svg)](https://hoseacodes.github.io/PropFlow-API/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
+
+📖 **[Documentation site](https://hoseacodes.github.io/PropFlow-API/)** · **[API reference](https://hoseacodes.github.io/PropFlow-API/api/)**
 
 A REST API for managing short-term rental properties and their financial ledger — properties, income and expense transactions, tax categorisation, refunds, and recurring charges.
 
@@ -12,7 +15,7 @@ Built as a **portfolio project**, deliberately taken past "it works" into the te
 
 ```bash
 git clone https://github.com/HoseaCodes/PropFlow-API.git && cd PropFlow-API
-cp .env.example .env && ./mvnw verify     # 178 tests. Only a JDK and Docker required.
+cp .env.example .env && ./mvnw verify     # 187 tests. Only a JDK and Docker required.
 ```
 
 > **Status: not production-ready, and not deployed.** It serves no real users and carries no real data. Every claim below is implemented and covered by tests; the [Known Limitations](#known-limitations) section is where the gaps are, and it is not boilerplate.
@@ -29,7 +32,7 @@ cp .env.example .env && ./mvnw verify     # 178 tests. Only a JDK and Docker req
 | **PostgreSQL modelling** | Real foreign keys, `CHECK` constraints, functional unique indexes, `ON DELETE RESTRICT` |
 | **Migrations** | 7 Flyway migrations; `ddl-auto=validate`; migrations that refuse to destroy data |
 | **Query performance** | Composite indexes chosen from actual access patterns; N+1 removed and pinned by a query-count test |
-| **Integration testing** | Testcontainers against real PostgreSQL — 178 tests, no mocked repositories |
+| **Integration testing** | Testcontainers against real PostgreSQL — 187 tests, 92% line coverage, no mocked repositories |
 | **API design** | Request/response DTOs, Bean Validation, RFC 7807 errors, pagination, correct status codes |
 | **Observability** | Actuator health with separated liveness/readiness, Prometheus metrics |
 | **Docker & CI** | Non-root JRE image, working Compose stack, GitHub Actions running the full suite |
@@ -135,7 +138,17 @@ Detail, including a disclosed credential-leak incident and the full limitations 
 
 ## Testing strategy
 
-**178 tests**, two tiers. No coverage percentage is quoted because none is measured — a number produced by testing getters is a negative signal.
+**187 tests** (77 unit, 110 integration), two tiers, with coverage measured across both and merged:
+
+| Metric | Covered |
+|---|---|
+| Lines | **92.2%** |
+| Instructions | **92.3%** |
+| Branches | **77.0%** |
+
+Reproduce with `./mvnw verify`, then open `target/site/jacoco/index.html`. CI prints the same table into every run summary, so the figure can never go stale the way a hardcoded badge does.
+
+DTOs, config classes, and the entry point are excluded — their accessors are compiler-generated, and counting them inflates the number without describing tested behaviour. There is deliberately **no build-failing coverage threshold**: a gate reliably produces tests written to satisfy the gate. Branch coverage at 77% is the honest weak spot, and it is the number worth watching.
 
 ```bash
 ./mvnw test      # unit only — no Docker, well under a second
@@ -303,6 +316,8 @@ Ranked by value, not effort:
 | [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md) | The original audit — 37 findings that started this work |
 | [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md) | The prioritised remediation plan |
 | [`AGENTS.md`](AGENTS.md) | Repository rules for AI coding agents, each citing the defect that motivated it |
+
+All of the above is also published as a [documentation site](https://hoseacodes.github.io/PropFlow-API/) with a browsable [API reference](https://hoseacodes.github.io/PropFlow-API/api/), built by [`.github/workflows/docs.yml`](.github/workflows/docs.yml). The OpenAPI spec is generated from the running application during the build and validated before publishing, so it cannot drift from the code.
 
 ---
 

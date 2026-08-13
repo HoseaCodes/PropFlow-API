@@ -43,6 +43,24 @@ jobs:
       - name: Build, test, and package
         run: ./mvnw -B --no-transfer-progress verify
 
+      # Printed into the run summary rather than published as a badge. A static
+      # badge encodes a number that silently goes stale; the run summary is
+      # always the figure for the commit being built.
+      # Printed into the run summary rather than published as a badge. A static
+      # badge encodes a number that silently goes stale; the run summary is
+      # always the figure for the commit being built.
+      - name: Coverage summary
+        if: always()
+        run: python3 .github/scripts/coverage_summary.py
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: target/site/jacoco/
+          retention-days: 7
+
       - name: Publish test report
         # Runs even when tests fail -- that is precisely when the report matters.
         if: always()

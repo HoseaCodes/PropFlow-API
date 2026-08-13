@@ -30,17 +30,17 @@ Then have the example ready (see Q24). What sells this is that I found real bugs
 
 ## Contents
 
-- [Architecture & design](#architecture--design)
+- [Architecture & design](#architecture-and-design)
 - [Security](#security)
-- [Data & PostgreSQL](#data--postgresql)
+- [Data & PostgreSQL](#data-and-postgresql)
 - [Testing](#testing)
 - [Scale, operations, failure](#scale-operations-failure)
-- [Process & judgement](#process--judgement)
+- [Process & judgement](#process-and-judgement)
 - [Questions I should be ready to be stumped by](#questions-i-should-be-ready-to-be-stumped-by)
 
 ---
 
-## Architecture & design
+## Architecture and design
 
 ### Q1. Why did you structure the application this way?
 
@@ -349,7 +349,7 @@ shipping to production; error responses echoing raw SQL constraint text.
 
 ---
 
-## Data & PostgreSQL
+## Data and PostgreSQL
 
 ### Q10. Why PostgreSQL?
 
@@ -726,7 +726,7 @@ code reading the new one, then drop the old in a later release.
 
 ---
 
-## Process & judgement
+## Process and judgement
 
 ### Q23. What would you change before putting this in production?
 

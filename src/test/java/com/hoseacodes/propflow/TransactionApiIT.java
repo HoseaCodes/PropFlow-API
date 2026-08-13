@@ -30,6 +30,7 @@ import com.hoseacodes.propflow.dto.request.TransactionSearchRequest;
 import com.hoseacodes.propflow.model.transactions.PaymentMethod;
 import com.hoseacodes.propflow.model.transactions.Transaction;
 import com.hoseacodes.propflow.model.transactions.TransactionCategory;
+import com.hoseacodes.propflow.model.transactions.TransactionFrequency;
 import com.hoseacodes.propflow.model.transactions.TransactionStatus;
 import com.hoseacodes.propflow.model.transactions.TransactionType;
 import com.hoseacodes.propflow.repository.PropertyRepository;
@@ -364,6 +365,148 @@ class TransactionApiIT extends AbstractIntegrationTest {
             assertThat(objectMapper.readTree(body).get("totalElements").asInt()).isEqualTo(1);
             assertThat(objectMapper.readTree(body).get("content").get(0)
                     .get("description").asText()).isEqualTo("Plumbing repair");
+        }
+
+
+        @Test
+        @DisplayName("filtering by category narrows the result set")
+        void filtersByCategory() throws Exception {
+            var request = new TransactionSearchRequest(null, null, null, null, null,
+                    TransactionCategory.BOOKING_PAYMENT, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null);
+
+            String body = searchBody(request);
+
+            assertThat(objectMapper.readTree(body).get("totalElements").asInt()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("filtering by payment method narrows the result set")
+        void filtersByPaymentMethod() throws Exception {
+            var request = new TransactionSearchRequest(null, null, null, null, null, null,
+                    null, null, PaymentMethod.BANK_TRANSFER, null, null, null, null, null,
+                    null, null, null, null, null);
+
+            String body = searchBody(request);
+
+            assertThat(objectMapper.readTree(body).get("totalElements").asInt()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("filtering by status narrows the result set")
+        void filtersByStatus() throws Exception {
+            var paid = new TransactionSearchRequest(null, null, null, null, null, null, null,
+                    TransactionStatus.PAID, null, null, null, null, null, null, null,
+                    null, null, null, null);
+            var cancelled = new TransactionSearchRequest(null, null, null, null, null, null, null,
+                    TransactionStatus.CANCELLED, null, null, null, null, null, null, null,
+                    null, null, null, null);
+
+            assertThat(objectMapper.readTree(searchBody(paid)).get("totalElements").asInt())
+                    .isEqualTo(3);
+            assertThat(objectMapper.readTree(searchBody(cancelled)).get("totalElements").asInt())
+                    .isZero();
+        }
+
+        @Test
+        @DisplayName("filtering by recurring narrows the result set")
+        void filtersByRecurring() throws Exception {
+            // A recurring charge, so the flag distinguishes something real.
+            createTransaction(new TransactionRequest(
+                    propertyId, TransactionType.EXPENSE, TransactionCategory.INSURANCE,
+                    null, "Annual policy", new BigDecimal("900.00"), daysAgo(10),
+                    TransactionStatus.PAID, PaymentMethod.BANK_TRANSFER, null,
+                    true, TransactionFrequency.ANNUALLY, "Insurer", null, null, null, null,
+                    null, null, List.of(), Map.of()));
+
+            var recurring = new TransactionSearchRequest(null, null, null, null, null, null,
+                    null, null, null, true, null, null, null, null, null, null, null, null, null);
+            var oneOff = new TransactionSearchRequest(null, null, null, null, null, null,
+                    null, null, null, false, null, null, null, null, null, null, null, null, null);
+
+            assertThat(objectMapper.readTree(searchBody(recurring)).get("totalElements").asInt())
+                    .isEqualTo(1);
+            assertThat(objectMapper.readTree(searchBody(oneOff)).get("totalElements").asInt())
+                    .isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("filtering by frequency narrows the result set")
+        void filtersByFrequency() throws Exception {
+            createTransaction(new TransactionRequest(
+                    propertyId, TransactionType.EXPENSE, TransactionCategory.MORTGAGE,
+                    null, "Mortgage", new BigDecimal("1500.00"), daysAgo(3),
+                    TransactionStatus.PAID, PaymentMethod.BANK_TRANSFER, null,
+                    true, TransactionFrequency.MONTHLY, "Bank", null, null, null, null,
+                    null, null, List.of(), Map.of()));
+
+            var request = new TransactionSearchRequest(null, null, null, null, null, null,
+                    null, null, null, null, TransactionFrequency.MONTHLY, null, null, null,
+                    null, null, null, null, null);
+
+            assertThat(objectMapper.readTree(searchBody(request)).get("totalElements").asInt())
+                    .isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("the overdue filter matches only unpaid transactions past their due date")
+        void filtersByOverdue() throws Exception {
+            // Past due and unpaid -- should match.
+            createTransaction(new TransactionRequest(
+                    propertyId, TransactionType.EXPENSE, TransactionCategory.UTILITIES,
+                    null, "Unpaid electricity", new BigDecimal("95.00"), daysAgo(40),
+                    TransactionStatus.OVERDUE, null, null, false, null, "Utility Co",
+                    null, null, daysAgo(10), null, null, null, List.of(), Map.of()));
+
+            // Past due but settled -- must NOT match. This is the case a naive
+            // "dueDate < now" predicate would wrongly include.
+            createTransaction(new TransactionRequest(
+                    propertyId, TransactionType.EXPENSE, TransactionCategory.UTILITIES,
+                    null, "Settled water bill", new BigDecimal("45.00"), daysAgo(40),
+                    TransactionStatus.PAID, PaymentMethod.BANK_TRANSFER, null, false, null,
+                    "Water Co", null, null, daysAgo(10), daysAgo(9), null, null,
+                    List.of(), Map.of()));
+
+            var request = new TransactionSearchRequest(null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, true, null, null, null, null, null);
+
+            String body = searchBody(request);
+
+            assertThat(objectMapper.readTree(body).get("totalElements").asInt()).isEqualTo(1);
+            assertThat(objectMapper.readTree(body).get("content").get(0)
+                    .get("description").asText()).isEqualTo("Unpaid electricity");
+        }
+
+        @Test
+        @DisplayName("filtering by property narrows to that property")
+        void filtersByProperty() throws Exception {
+            Long other = createProperty("Second Property");
+            createTransaction(new TransactionRequest(
+                    other, TransactionType.EXPENSE, TransactionCategory.CLEANING,
+                    null, "Other property clean", new BigDecimal("60.00"), daysAgo(1),
+                    TransactionStatus.PAID, PaymentMethod.CASH, null, false, null, "Cleaner",
+                    null, null, null, null, null, null, List.of(), Map.of()));
+
+            var request = new TransactionSearchRequest(null, null, null, null, null, null,
+                    other, null, null, null, null, null, null, null, null, null, null, null, null);
+
+            String body = searchBody(request);
+
+            assertThat(objectMapper.readTree(body).get("totalElements").asInt()).isEqualTo(1);
+            assertThat(objectMapper.readTree(body).get("content").get(0)
+                    .get("description").asText()).isEqualTo("Other property clean");
+        }
+
+        @Test
+        @DisplayName("filtering by vendor matches a partial, case-insensitive name")
+        void filtersByVendor() throws Exception {
+            var request = new TransactionSearchRequest(null, null, null, null, null, null,
+                    null, null, null, null, null, "SPARKLE", null, null, null,
+                    null, null, null, null);
+
+            String body = searchBody(request);
+
+            assertThat(objectMapper.readTree(body).get("totalElements").asInt()).isEqualTo(1);
         }
 
         @Test

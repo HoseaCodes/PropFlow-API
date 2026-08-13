@@ -1,0 +1,77 @@
+site_name: PropFlow API
+site_description: Engineering documentation for the PropFlow API
+site_url: https://hoseacodes.github.io/PropFlow-API/
+repo_url: https://github.com/HoseaCodes/PropFlow-API
+repo_name: HoseaCodes/PropFlow-API
+edit_uri: edit/master/docs/
+
+# The site is plain static output, so the host is interchangeable: GitHub Pages
+# (see .github/workflows/docs.yml) or Netlify (see netlify.toml). They are
+# alternatives, not layers -- pick one.
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle: {icon: material/weather-night, name: Switch to dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle: {icon: material/weather-sunny, name: Switch to light mode}
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.details
+  - pymdownx.highlight: {anchor_linenums: true}
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  # Renders ```mermaid blocks. Material ships the integration; without this the
+  # architecture and ER diagrams would render as unstyled code blocks.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+nav:
+  - Overview: index.md
+  - Architecture: ARCHITECTURE.md
+  - Security: SECURITY.md
+  - Operations: OPERATIONS.md
+  - API reference: api/index.html
+  - Decision records:
+      - Overview: adr/README.md
+      - 001 · PostgreSQL: adr/ADR-001-postgresql.md
+      - 002 · JWT authentication: adr/ADR-002-jwt-authentication.md
+      - 003 · Flyway migrations: adr/ADR-003-flyway-migrations.md
+      - 004 · Testcontainers: adr/ADR-004-testcontainers.md
+      - 005 · Single deployable: adr/ADR-005-modular-monolith.md
+      - 006 · NUMERIC money: adr/ADR-006-numeric-money.md
+  - History:
+      - Engineering audit: ENGINEERING_AUDIT.md
+      - Hardening plan: PORTFOLIO_HARDENING_PLAN.md
+  - Interview guide: INTERVIEW_GUIDE.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/HoseaCodes/PropFlow-API

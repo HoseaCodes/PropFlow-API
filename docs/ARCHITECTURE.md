@@ -2,7 +2,7 @@
 
 How the system is put together and why. Companion documents:
 [`SECURITY.md`](./SECURITY.md), [`OPERATIONS.md`](./OPERATIONS.md),
-[`adr/`](./adr/).
+[`adr/`](./adr/README.md).
 
 ---
 

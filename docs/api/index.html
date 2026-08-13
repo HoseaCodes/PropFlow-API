@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropFlow API — Reference</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css"/>
+  <style>
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .notice {
+      background: #0f3d3e; color: #e8f5f5; padding: 1rem 1.5rem;
+      font-size: .95rem; line-height: 1.6;
+    }
+    .notice a { color: #7fd8d8; }
+    .notice code {
+      background: rgba(255,255,255,.12); padding: .1rem .35rem; border-radius: 3px;
+    }
+    .swagger-ui .topbar { display: none; }
+  </style>
+</head>
+<body>
+  <div class="notice">
+    <strong>Read-only reference.</strong>
+    This is a static rendering of the OpenAPI document, published from the build.
+    <strong>The API is not hosted anywhere</strong>, so “Try it out” is disabled — there is
+    no server to call. To exercise the endpoints, run the project locally
+    (<code>docker compose up --build</code>) and open
+    <code>http://localhost:8080/swagger-ui.html</code>, where the same spec is served
+    with authentication enabled.
+    <br/>
+    <a href="../">← Back to documentation</a> ·
+    <a href="./openapi.json">Download openapi.json</a> ·
+    <a href="https://github.com/HoseaCodes/PropFlow-API">Source</a>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      SwaggerUIBundle({
+        url: './openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        docExpansion: 'list',
+        defaultModelsExpandDepth: 1,
+        // No backend is deployed, so every "Try it out" call would fail with a
+        // connection or CORS error and make a working API look broken. An empty
+        // list removes the control entirely rather than leaving a button that
+        // cannot succeed.
+        supportedSubmitMethods: [],
+        presets: [SwaggerUIBundle.presets.apis],
+      });
+    };
+  </script>
+</body>
+</html>

@@ -23,7 +23,7 @@
 > | No foreign keys on transactions | Real FKs with `ON DELETE RESTRICT` + composite indexes |
 > | No CI, no health endpoint, broken Swagger | GitHub Actions, Actuator probes, working OpenAPI |
 >
-> Current state: [`README.md`](../README.md) ·
+> Current state: [`README.md`](https://github.com/HoseaCodes/PropFlow-API#readme) ·
 > Remediation plan: [`PORTFOLIO_HARDENING_PLAN.md`](./PORTFOLIO_HARDENING_PLAN.md) ·
 > Remaining gaps: [`SECURITY.md`](./SECURITY.md)
 
