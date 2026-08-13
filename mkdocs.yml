@@ -67,10 +67,15 @@ nav:
       - 004 · Testcontainers: adr/ADR-004-testcontainers.md
       - 005 · Single deployable: adr/ADR-005-modular-monolith.md
       - 006 · NUMERIC money: adr/ADR-006-numeric-money.md
-  - History:
-      - Engineering audit: ENGINEERING_AUDIT.md
-      - Hardening plan: PORTFOLIO_HARDENING_PLAN.md
-  - Interview guide: INTERVIEW_GUIDE.md
+
+# Deliberately absent from the nav: ENGINEERING_AUDIT.md,
+# PORTFOLIO_HARDENING_PLAN.md and INTERVIEW_GUIDE.md. They are still built and
+# still reachable from the links that point at them, but they are process
+# artefacts rather than API documentation, so they do not earn a nav slot.
+not_in_nav: |
+  ENGINEERING_AUDIT.md
+  PORTFOLIO_HARDENING_PLAN.md
+  INTERVIEW_GUIDE.md
 
 extra:
   social:
