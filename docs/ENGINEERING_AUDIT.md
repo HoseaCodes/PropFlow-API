@@ -1,5 +1,32 @@
 # PropFlow API — Engineering Audit
 
+> ## ⚠️ HISTORICAL DOCUMENT
+>
+> **This audit describes the repository as it was at commit `f771d7d`, before
+> remediation. It is not a description of the current state.** It is kept
+> unedited because the findings, and the git history of fixing them, are part of
+> what this repository is meant to demonstrate.
+>
+> The classification below — **prototype** — was accurate then and is not now.
+>
+> | Then (`f771d7d`) | Now |
+> |---|---|
+> | Entire API anonymously reachable | JWT authentication, default-deny, row-level ownership |
+> | No JWT despite the README claiming it | Implemented, 13 unit tests on signing and verification |
+> | Live DB password committed | Rotated; all config from the environment |
+> | Plaintext passwords via `POST /api/users` | Single BCrypt registration path; endpoint removed |
+> | BCrypt hashes in API responses | Response DTOs with no password component |
+> | `mvn test` failed on a clean clone | `mvn verify` passes: 178 tests, Testcontainers |
+> | `ddl-auto=update`, no migrations | 7 Flyway migrations, `ddl-auto=validate` |
+> | Search silently ignored every filter | Fixed, with regression tests |
+> | `DOUBLE PRECISION` money | `NUMERIC(19,2)` |
+> | No foreign keys on transactions | Real FKs with `ON DELETE RESTRICT` + composite indexes |
+> | No CI, no health endpoint, broken Swagger | GitHub Actions, Actuator probes, working OpenAPI |
+>
+> Current state: [`README.md`](../README.md) ·
+> Remediation plan: [`PORTFOLIO_HARDENING_PLAN.md`](./PORTFOLIO_HARDENING_PLAN.md) ·
+> Remaining gaps: [`SECURITY.md`](./SECURITY.md)
+
 **Audit date:** 2026-08-07
 **Commit audited:** `f771d7d` (`master`)
 **Auditor perspective:** Senior/Staff backend engineer reviewing the repository as a hiring signal for a Senior Full-Stack Product Engineer role.

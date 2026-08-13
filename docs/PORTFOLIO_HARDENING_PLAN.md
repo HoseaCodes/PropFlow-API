@@ -1,5 +1,33 @@
 # PropFlow API — Portfolio Hardening Plan
 
+> ## Status: P0 and P1 complete; P2 partially complete
+>
+> This plan was written before the work started and is kept as authored, so the
+> plan and the outcome can be compared. Progress against it:
+>
+> | | Status |
+> |---|---|
+> | **P0** — Maven wrapper, credential removal, logging, package rename, README triage | ✅ complete |
+> | **P1-1** Flyway migrations | ✅ complete (7 migrations) |
+> | **P1-2** Testcontainers harness | ✅ complete |
+> | **P1-3** JWT authentication | ✅ complete |
+> | **P1-4** Ownership authorization | ✅ complete |
+> | **P1-5** DTOs and validation | ✅ complete |
+> | **P1-6** RFC 7807 error model | ✅ complete |
+> | **P1-7** Foreign keys, indexes, `BigDecimal` | ✅ complete |
+> | **P1-8** N+1, pagination, HTTP semantics | ✅ complete |
+> | **P1-9** Actuator, Docker, CI, OpenAPI | ✅ complete |
+> | **P2** — Architecture docs, ADRs, `SECURITY.md`, `OPERATIONS.md`, `AGENTS.md`, README rewrite, interview guide | ✅ complete |
+> | **P2-1** `Booking` API with exclusion constraint | ❌ not done — the most valuable remaining feature |
+> | **P2-9** Dependency scanning | ❌ not done |
+> | **P2-10** Rate limiting on authentication | ❌ not done — the most significant security gap |
+> | **P2-12** `java.time` migration | ❌ not done |
+>
+> Two items were resolved differently than planned, both recorded in the commits:
+> `Expense` and `CleaningChecklist` were deleted rather than merged, and
+> `POST /api/users` / `PUT /api/users/{id}` were removed outright rather than
+> repaired, because neither had a safe minimal fix.
+
 **Created:** 2026-08-07
 **Baseline commit:** `f771d7d`
 **Input:** [`ENGINEERING_AUDIT.md`](./ENGINEERING_AUDIT.md) — 37 findings across CRITICAL/HIGH/MEDIUM/LOW
