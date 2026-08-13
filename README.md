@@ -1,36 +1,75 @@
 # PropFlow API
 
 [![CI](https://github.com/HoseaCodes/PropFlow-API/actions/workflows/ci.yml/badge.svg)](https://github.com/HoseaCodes/PropFlow-API/actions/workflows/ci.yml)
+[![Java 17](https://img.shields.io/badge/Java-17-orange)](https://openjdk.org/projects/jdk/17/)
+[![Spring Boot 3.4](https://img.shields.io/badge/Spring%20Boot-3.4-green)](https://spring.io/projects/spring-boot)
+[![PostgreSQL 15](https://img.shields.io/badge/PostgreSQL-15-blue)](https://www.postgresql.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 
-A REST API for managing short-term rental properties and their financial transactions — properties, income and expense records, tax categorisation, and recurring charges.
+A REST API for managing short-term rental properties and their financial ledger — properties, income and expense transactions, tax categorisation, refunds, and recurring charges.
 
-> **Status: portfolio project, actively being hardened.**
->
-> This repository is mid-way through a documented engineering review. A full audit of its original weaknesses is published in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md), and the remediation plan is in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md).
->
-> This README documents only what the code actually does today; capabilities are added here as they land.
+Built as a **portfolio project**, deliberately taken past "it works" into the territory that actually matters in production: authorization that fails closed, schema owned by reviewable migrations, tests against a real database, errors that leak nothing, and honest documentation of what is still missing.
 
----
+```bash
+git clone https://github.com/HoseaCodes/PropFlow-API.git && cd PropFlow-API
+cp .env.example .env && ./mvnw verify     # 178 tests. Only a JDK and Docker required.
+```
 
-## Tech Stack
-
-- Java 17
-- Spring Boot 3.4.0
-- Spring Security 6 with stateless JWT bearer authentication
-- Spring Data JPA / Hibernate 6
-- PostgreSQL 15
-- Flyway (schema migrations)
-- Maven (wrapper included)
-- Docker / Docker Compose
-- Testcontainers (integration tests against real PostgreSQL)
-- Spring Boot Actuator + Micrometer/Prometheus
-- springdoc-openapi (Swagger UI)
-- GitHub Actions
-- Lombok
+> **Status: not production-ready, and not deployed.** It serves no real users and carries no real data. Every claim below is implemented and covered by tests; the [Known Limitations](#known-limitations) section is where the gaps are, and it is not boilerplate.
 
 ---
 
-## Domain Model
+## What it demonstrates
+
+| | |
+|---|---|
+| **Spring Boot REST API** | Layered architecture with enforced boundaries; controllers stay thin |
+| **Spring Security 6** | Stateless JWT, default-deny filter chain, roles **and** row-level ownership |
+| **Authorization that fails closed** | Ownership enforced *inside the query*, not checked after loading |
+| **PostgreSQL modelling** | Real foreign keys, `CHECK` constraints, functional unique indexes, `ON DELETE RESTRICT` |
+| **Migrations** | 7 Flyway migrations; `ddl-auto=validate`; migrations that refuse to destroy data |
+| **Query performance** | Composite indexes chosen from actual access patterns; N+1 removed and pinned by a query-count test |
+| **Integration testing** | Testcontainers against real PostgreSQL — 178 tests, no mocked repositories |
+| **API design** | Request/response DTOs, Bean Validation, RFC 7807 errors, pagination, correct status codes |
+| **Observability** | Actuator health with separated liveness/readiness, Prometheus metrics |
+| **Docker & CI** | Non-root JRE image, working Compose stack, GitHub Actions running the full suite |
+| **Engineering process** | A published [audit](docs/ENGINEERING_AUDIT.md) of this repository's own defects, and the [plan](docs/PORTFOLIO_HARDENING_PLAN.md) that fixed them |
+
+**This repository began as a prototype with serious defects** — an entirely unauthenticated API, a committed database password, plaintext passwords on one code path, and a README advertising JWT authentication that did not exist. Rather than quietly fixing them, the audit that found them is published, and the git history shows each fix with its reasoning. That process is the point as much as the result.
+
+---
+
+## Architecture
+
+```mermaid
+graph TD
+    Client["Client<br/>(SPA · Swagger UI · curl)"]
+    subgraph API["PropFlow API — Spring Boot 3.4"]
+        JWT["JwtAuthenticationFilter<br/>verify signature + expiry"]
+        SEC["Authorization rules<br/><i>default deny</i>"]
+        CTRL["Controllers<br/>bind · delegate · map"]
+        VAL["Bean Validation"]
+        SVC["Services<br/>business rules · ownership scoping<br/><b>transaction boundary</b>"]
+        REPO["Repositories<br/>JPA + Specifications"]
+        ERR["GlobalExceptionHandler<br/>RFC 7807"]
+    end
+    DB[("PostgreSQL 15<br/>FK · CHECK · UNIQUE")]
+    FLY["Flyway<br/>migrations at startup"]
+
+    Client -->|"Bearer JWT"| JWT --> SEC --> CTRL --> VAL --> SVC --> REPO --> DB
+    FLY --> DB
+    CTRL -.->|throws| ERR
+    SVC -.->|throws| ERR
+    ERR -.->|problem+json| Client
+```
+
+Five independent layers of defence: authentication, role authorization, input validation, ownership scoping, and database constraints. Each catches what the one before it cannot — the database being the only layer that binds a writer bypassing the application.
+
+Detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Domain model
 
 ```mermaid
 erDiagram
@@ -43,55 +82,153 @@ erDiagram
         bigint id PK
         string email UK "unique on lower(email)"
         string username UK "unique on lower(username)"
-        string password "BCrypt hash"
+        string password "BCrypt"
         string role "USER | ADMIN"
         bigint version "optimistic lock"
     }
     PROPERTY {
         bigint id PK
-        bigint owner_id FK "-> users.id, RESTRICT"
-        string name
-        string address
+        bigint owner_id FK "RESTRICT"
         numeric base_price "NUMERIC(19,2)"
-        boolean active
-        string str_permit_number
         bigint version
     }
     TRANSACTION {
         bigint id PK
-        bigint user_id FK "-> users.id, RESTRICT"
-        bigint property_id FK "-> properties.id, RESTRICT"
+        bigint user_id FK "RESTRICT"
+        bigint property_id FK "RESTRICT"
         string property_name "point-in-time snapshot"
         string type "INCOME | EXPENSE"
-        string category
+        string category "23 values, CHECK-constrained"
         numeric transaction_amount "NUMERIC(19,2), > 0"
-        timestamp date
         bigint version
     }
     BOOKING {
         bigint id PK
-        bigint property_id FK "-> properties.id"
-        timestamp check_in
-        timestamp check_out
-        numeric total_price
+        bigint property_id FK
     }
 ```
 
-Every relationship is a real foreign key with `ON DELETE RESTRICT`. Deleting a user who still owns properties, or a property that still has transactions, is refused by the database rather than silently orphaning financial history — the API surfaces that as `409`.
+Every relationship is a real foreign key with `ON DELETE RESTRICT`. Deleting a user who owns properties, or a property with transactions, is refused by the database — financial history does not disappear as a side effect. The API surfaces that as `409`.
 
-`property_name` on a transaction is deliberately denormalised: a financial record should show the name in force when it was written, so renaming a property does not rewrite past statements.
-
-`Booking` entity and table also exist, with a proper foreign key to `properties`, but no API is exposed for it yet. The unused `Expense` and `CleaningChecklist` entities were removed — `Expense` duplicated `Transaction`, and neither had any endpoint.
+`property_name` is denormalised deliberately: a financial record shows the name in force when it was written, so renaming a property does not rewrite past statements.
 
 ---
 
-## API
+## Security
 
-Base URL: `http://localhost:8080`
+**Authentication** — stateless JWT (HS256). `JWT_SECRET` has no default and the application *refuses to start without it*; a default signing key is a forgery oracle. Passwords are BCrypt-hashed in exactly one code path, because a control enforced at a call site eventually gets bypassed at another — which is precisely what happened here.
 
-Every endpoint requires a bearer token except `POST /api/auth/signup`, `POST /api/auth/signin`, and the OpenAPI paths. Unauthenticated requests receive `401`; authenticated requests lacking the required role receive `403`. Both are RFC 7807 `application/problem+json`.
+**Authorization** — two layers. Roles (`USER`/`ADMIN`) decide what kind of account you are; **ownership** decides which rows you may touch. Ownership is expressed in the query:
 
-**Every property and transaction read is scoped to the authenticated owner.** Requesting a resource that belongs to someone else returns **`404`, not `403`** — a 403 would confirm the id exists and let an attacker enumerate the id space. Scoping is applied inside the query (`findByIdAndOwner`, and an ownership `Specification` on transactions) rather than as a check after loading, so a forgotten scope fails closed. Accounts with the `ADMIN` role read across owners.
+```java
+propertyRepository.findByIdAndOwner(id, caller)
+Specification.allOf(scopedTo(caller), hasId(id))
+```
+
+A check performed *after* loading protects only the call sites that remember it. A scoped query **fails closed** — forget it and you get an empty result, not a breach.
+
+Another user's resource returns **404, not 403**. A 403 confirms the id exists and lets an attacker enumerate.
+
+Detail, including a disclosed credential-leak incident and the full limitations list: [`docs/SECURITY.md`](docs/SECURITY.md).
+
+---
+
+## Testing strategy
+
+**178 tests**, two tiers. No coverage percentage is quoted because none is measured — a number produced by testing getters is a negative signal.
+
+```bash
+./mvnw test      # unit only — no Docker, well under a second
+./mvnw verify    # + integration against real PostgreSQL
+```
+
+| Tier | Runner | Covers |
+|---|---|---|
+| Unit (`*Test`) | Surefire | JWT signing/verification, income-expense category rules |
+| Integration (`*IT`) | Failsafe | HTTP → controller → service → repository → **real PostgreSQL** |
+
+Integration tests use **Testcontainers, not H2**. An in-memory database in "PostgreSQL compatibility mode" is not PostgreSQL — it diverges on type coercion, constraint semantics, sequences and `NUMERIC` precision, so a passing test would not be evidence about the deployed database. Several tests assert PostgreSQL behaviour directly: functional-index uniqueness, `ON DELETE RESTRICT`, `NUMERIC` arithmetic, and index column order read from `pg_indexes`.
+
+The container starts once per JVM and is shared, so the first integration class pays ~10s and the next runs in **0.097s**.
+
+What the suite proves, beyond "the endpoints respond":
+
+- **One user cannot reach another's data** by read, list, search, update, delete, or by writing against their property
+- **The database enforces its own invariants** — asserted with raw SQL that bypasses the application entirely
+- **Money is exact** — `0.10 + 0.20` summed by PostgreSQL equals `0.30`
+- **A 5-row page issues ≤ 2 queries** — an N+1 is invisible in a response body, so it is measured via Hibernate statistics
+- **Search filters actually filter** — the regression test for a bug where a fully-built `Specification` was silently discarded
+
+---
+
+## Reliability & operations
+
+| Concern | Approach |
+|---|---|
+| Database outage | Fails **readiness**, not liveness — traffic stops routing, processes stay alive. Restarting cannot fix a database, and restarting the fleet causes a cold-start stampede on recovery. |
+| Concurrent updates | Optimistic locking (`@Version`) on all three mutable entities → `409`, not a silent lost update |
+| Duplicate registration | Application check for a friendly message; a **functional unique index** is the actual guarantee, since check-then-act is racy |
+| Accidental deletion | `ON DELETE RESTRICT` → `409` rather than orphaned financial records |
+| Bad migration | Flyway aborts, `ddl-auto=validate` refuses to start on drift, naming the exact column |
+| Error leakage | RFC 7807 with a correlation id; stack traces and SQL stay in the log |
+
+Health, metrics, failure modes, what breaks first under load, and what a real deployment would add: [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
+
+---
+
+## Local development
+
+**Prerequisites:** JDK 17+, Docker.
+
+```bash
+git clone https://github.com/HoseaCodes/PropFlow-API.git
+cd PropFlow-API
+cp .env.example .env
+openssl rand -base64 48          # paste into JWT_SECRET in .env
+
+docker compose up -d db          # PostgreSQL only — run the app from your IDE
+./mvnw spring-boot:run
+
+# or the whole stack
+docker compose up --build
+```
+
+The API listens on <http://localhost:8080>. Flyway applies migrations at startup.
+
+Tests need **no running database** — Testcontainers manages its own.
+
+<details>
+<summary>Configuration reference</summary>
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `JWT_SECRET` | **none — startup fails** | HMAC signing key. `openssl rand -base64 48` |
+| `JWT_EXPIRATION` | `1h` | Token lifetime |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/propflow` | JDBC URL |
+| `DB_USERNAME` / `DB_PASSWORD` | `propflow` | Local container credentials — not secrets |
+| `DB_HOST_PORT` | `5432` | Change if a local PostgreSQL already owns it |
+| `ADMINER_HOST_PORT` | `8082` | Adminer UI |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | `*` is rejected at startup |
+| `SPRING_PROFILES_ACTIVE` | `dev` | Active profile |
+| `PORT` | `8080` | HTTP port |
+
+No credential is stored in any tracked file.
+
+**Gotcha:** PostgreSQL ignores `POSTGRES_USER`/`POSTGRES_PASSWORD` when the data volume already exists — they only apply on first initialisation. Reset with `docker compose down -v` (**deletes the volume**).
+</details>
+
+---
+
+## API documentation
+
+With the application running:
+
+| | |
+|---|---|
+| **Swagger UI** | <http://localhost:8080/swagger-ui.html> |
+| **OpenAPI JSON** | <http://localhost:8080/v3/api-docs> |
+
+Generated from the controllers and validation constraints, so it cannot drift from the code — which is why endpoints are not re-listed at length here. Sign in via `POST /api/auth/signin`, click **Authorize**, paste the `accessToken`, and every protected endpoint is callable from the browser.
 
 ```bash
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/signin \
@@ -101,218 +238,71 @@ TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/signin \
 curl http://localhost:8080/api/properties -H "Authorization: Bearer $TOKEN"
 ```
 
-### Authentication (public)
-| Method | Path | Notes |
-|---|---|---|
-| `POST` | `/api/auth/signup` | Creates a user; BCrypt-hashed password; returns `201` and never returns credentials |
-| `POST` | `/api/auth/signin` | Returns a signed JWT, its type, its lifetime, and the user |
+**Resources:** `/api/auth` (public), `/api/properties`, `/api/transactions`, `/api/users` (mostly `ADMIN`), `/actuator/health` (public).
 
-### Properties
-| Method | Path | Success | Notes |
-|---|---|---|---|
-| `GET` | `/api/properties` | `200` | Paged: `?page=&size=&sort=`. Default size 20, max 100. |
-| `GET` | `/api/properties/{id}` | `200` | `404` if unknown |
-| `POST` | `/api/properties` | `201` | Validated; returns `Location` |
-| `PUT` | `/api/properties/{id}` | `200` | Validated; full replacement |
-| `DELETE` | `/api/properties/{id}` | `204` | `404` if unknown |
-
-Paged responses use a stable envelope rather than Spring's `PageImpl`:
-
-```json
-{ "content": [ ... ], "page": 0, "size": 20, "totalElements": 42, "totalPages": 3, "last": false }
-```
-
-### Transactions
-| Method | Path | Success | Notes |
-|---|---|---|---|
-| `GET` | `/api/transactions` | `200` | Paged summaries |
-| `GET` | `/api/transactions/{id}` | `200` | Full record incl. tags and metadata |
-| `GET` | `/api/transactions/property/{propertyId}` | `200` | Paged |
-| `POST` | `/api/transactions` | `201` | Owner taken from the token, not the body |
-| `PUT` | `/api/transactions/{id}` | `200` | Partial-safe: unsent fields are preserved |
-| `DELETE` | `/api/transactions/{id}` | `204` | |
-| `POST` | `/api/transactions/search` | `200` | 16 optional filters, paged and sorted |
-
-List endpoints return **summaries** without tags, warranties, or metadata; the detail endpoint returns the full record. Those are lazy collections, so including them in a listing would cost up to three extra queries per row. An integration test asserts a 5-row page issues at most 2 SQL statements.
-
-`POST` is used for search deliberately: sixteen optional criteria including free text and date ranges do not encode comfortably as query parameters. The cost is that the response is not cacheable.
-
-Recording an `INCOME` transaction in an expense category (or vice versa) returns **422** — every field is individually valid, but the combination violates a domain rule.
-
-### Users
-| Method | Path | Required role |
-|---|---|---|
-| `GET` | `/api/users/me` | any authenticated user |
-| `GET` | `/api/users` | `ADMIN` |
-| `GET` | `/api/users/{id}` | `ADMIN` |
-| `DELETE` | `/api/users/{id}` | `ADMIN` |
-
-`POST /api/users` and `PUT /api/users/{id}` were **removed**. The first persisted passwords without hashing and duplicated signup; the second bound the JPA entity directly and saved it under the path's id with no ownership check, so any caller could rewrite any account's credentials. Safe replacements arrive with the DTO work.
-
-A Postman collection covering the auth and user endpoints is at [`src/main/resources/postman.json`](src/main/resources/postman.json).
+**Errors** are RFC 7807 `application/problem+json`: `400` invalid field (with per-field `errors`), `401` no token, `403` wrong role, `404` missing *or not yours*, `409` conflict, `422` valid fields in an invalid combination.
 
 ---
 
-## Local Development
+## Engineering decisions
 
-### Prerequisites
-- JDK 17+
-- Docker (for PostgreSQL)
+Six decisions where a competent engineer could reasonably have chosen otherwise. Each [ADR](docs/adr/) states its downsides — one that lists none is marketing.
 
-### 1. Clone and configure
+**[PostgreSQL over MongoDB](docs/adr/ADR-001-postgresql.md)** — the invariants here are relational. A document store can only enforce "every transaction references a real property" advisorily, in application code. This project has already lived that failure: transactions referenced users through an unvalidated `VARCHAR` and the model drifted.
 
-```bash
-git clone https://github.com/HoseaCodes/PropFlow-API.git
-cd PropFlow-API
-cp .env.example .env
-```
+**[JWT, with the revocation problem stated plainly](docs/adr/ADR-002-jwt-authentication.md)** — stateless tokens cannot be revoked before expiry. The mitigation implemented is a per-request principal reload, so a deleted account stops working immediately; it costs a query per request and gives up some statelessness. A denylist would work but would mean the original choice was wrong.
 
-`.env.example` contains placeholders only. The defaults point at the Docker Compose database and are throwaway local values, not secrets. If port 5432 is already in use on your machine, set `DB_HOST_PORT` in `.env` and update the port in `DB_URL` to match.
+**[Flyway over `ddl-auto=update`](docs/adr/ADR-003-flyway-migrations.md)** — auto-DDL only ever *adds*, produces nothing reviewable in a PR, and yields a schema that depends on deploy history rather than current code. The `V1` baseline deliberately preserves the model's known defects so the fixes land as real, reviewable migrations.
 
-### 2. Start PostgreSQL
+**[Testcontainers over H2](docs/adr/ADR-004-testcontainers.md)** — four existing tests would be meaningless against an in-memory substitute. The cost is a hard Docker dependency and seconds instead of milliseconds.
 
-```bash
-docker compose up -d db
-```
+**[One deployable, not microservices](docs/adr/ADR-005-modular-monolith.md)** — one bounded context, one team, one transactional model. Splitting would trade ACID for eventual consistency *in a financial ledger*. Also records why Kafka, Redis, Kubernetes, CQRS, and OpenTelemetry were each rejected, and which constraints would change the answer.
 
-> If you change `POSTGRES_USER` / `POSTGRES_PASSWORD` after the volume already exists, PostgreSQL will ignore them — those variables only apply when it initialises an empty data directory. Reset with `docker compose down -v`, which **deletes the local database volume**.
-
-### 3. Run the application
-
-```bash
-./mvnw spring-boot:run
-```
-
-The API listens on `http://localhost:8080`.
-
-Flyway applies the migrations in [`src/main/resources/db/migration`](src/main/resources/db/migration) automatically at startup, in version order. Hibernate runs with `ddl-auto=validate`: it verifies that the entity mappings match the migrated schema and refuses to start if they have drifted, but never modifies the schema itself.
-
-### 4. Run the tests
-
-```bash
-./mvnw test      # unit tests only — fast, no Docker required
-./mvnw verify    # unit + integration tests — starts a PostgreSQL container
-```
-
-Tests are split into two tiers:
-
-| Tier | Naming | Runner | What it covers |
-|---|---|---|---|
-| **Unit** | `*Test` | Surefire (`mvn test`) | Pure logic — no Spring context, no database. Runs in well under a second. |
-| **Integration** | `*IT` | Failsafe (`mvn verify`) | Full stack: HTTP → controller → service → repository → real PostgreSQL. |
-
-Integration tests run against **PostgreSQL in Docker via Testcontainers**, not an in-memory database. An in-memory database in "PostgreSQL compatibility mode" is not PostgreSQL — it diverges on type coercion, constraint semantics, sequences, `NUMERIC` precision, and SQL dialect — so a test that passes against it is not evidence about the database this application actually deploys on.
-
-The container is started once per JVM and shared across all integration test classes, and Flyway migrates the fresh database on first startup. Every run is therefore continuous proof that the migrations apply cleanly from nothing.
-
-You do **not** need `docker compose up -d db` to run the tests; Testcontainers manages its own database. Only Docker itself is required.
-
-### Full stack in Docker
-
-```bash
-docker compose up --build
-```
-
-Starts PostgreSQL, the API, and [Adminer](http://localhost:8082) for browsing the database. The app container waits for the database to report healthy before starting, and has its own healthcheck against the readiness probe.
-
-`JWT_SECRET` has no default: Compose fails with an explanatory message rather than booting with a signing key committed to this repository.
+**[`BigDecimal`/`NUMERIC` for money](docs/adr/ADR-006-numeric-money.md)** — `0.1 + 0.2 == 0.30000000000000004`. Invisible per row; not invisible in a year's tax total.
 
 ---
 
-## API Documentation
+## Known limitations
 
-With the application running:
+Stated plainly. Finding these undisclosed would be worse than reading them here.
+
+- **Tokens cannot be revoked before expiry** — inherent to stateless JWT. One-hour lifetime; deleted accounts stop working immediately via the per-request reload.
+- **No rate limiting on sign-in.** Credential stuffing is unmitigated, and BCrypt's cost makes a flood a CPU denial-of-service vector. The most significant gap.
+- **No refresh tokens**, no password reset, no MFA, no email verification.
+- **`POST` is not idempotent.** Retrying `POST /api/transactions` after a timeout creates a duplicate. For a ledger this is a genuine gap; the fix is an `Idempotency-Key` header.
+- **No audit log.** Financial mutations are protected by constraints but there is no immutable record of who changed what.
+- **Timestamps use `java.util.Date`** rather than `java.time` — mutable and timezone-blind.
+- **Free-text search is a sequential scan.** `LIKE '%term%'` cannot use a B-tree index. Upgrade path: `tsvector` + GIN.
+- **No `Booking` API.** Table and entity exist; date-overlap prevention is not implemented.
+- **No load testing.** No throughput or latency numbers are claimed anywhere in this repository.
+- **No dependency scanning or penetration testing.**
+
+---
+
+## Future improvements
+
+Ranked by value, not effort:
+
+1. **Rate limiting and lockout** on authentication
+2. **`Booking` with a PostgreSQL exclusion constraint** (`EXCLUDE USING gist`) preventing double-booking *at the database level* — an invariant that survives concurrent requests, which application-level checking cannot guarantee
+3. **Refresh-token flow**, enabling access-token lifetimes in minutes
+4. **Append-only audit log** for financial mutations
+5. **`java.time` migration** and idempotency keys
+6. **Dependency and container scanning** in CI
+
+---
+
+## Documentation
 
 | | |
 |---|---|
-| Swagger UI | <http://localhost:8080/swagger-ui.html> |
-| OpenAPI JSON | <http://localhost:8080/v3/api-docs> |
-
-The spec is generated from the controllers and the validation constraints on the request records, so it cannot drift from the code — which is why endpoint details are not duplicated at length here.
-
-To exercise protected endpoints: sign in via `POST /api/auth/signin`, click **Authorize**, and paste the `accessToken`.
-
----
-
-## Operations
-
-| Endpoint | Access | Purpose |
-|---|---|---|
-| `/actuator/health` | public | Aggregate status. `UP`/`DOWN` only for anonymous callers. |
-| `/actuator/health/liveness` | public | Is the process broken beyond recovery? Restart if `DOWN`. |
-| `/actuator/health/readiness` | public | Can it serve traffic? Includes the database check. |
-| `/actuator/prometheus` | `ADMIN` | Metrics scrape endpoint |
-| `/actuator/info` | `ADMIN` | Build information |
-
-**Liveness and readiness are deliberately different.** The database is part of readiness and *not* liveness: during a database outage every instance should stop taking traffic while staying alive. Restarting cannot fix the database, and a restart loop across the fleet turns a recoverable dependency failure into a cold-start stampede when it recovers.
-
-Endpoints that dump configuration or memory (`env`, `beans`, `configprops`, `heapdump`, `threaddump`, `loggers`, `mappings`) are **not exposed at all** — removed from the exposure list rather than merely gated behind a role. An integration test asserts they return 404.
-
----
-
-## Continuous Integration
-
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request to `master`:
-
-1. `./mvnw verify` — compile, unit tests, integration tests against real PostgreSQL via Testcontainers, package
-2. Publish a test report and upload results on failure
-3. Build the Docker image and assert it **refuses to start without `JWT_SECRET`**
-
-The GitHub-hosted runner provides a Docker daemon, so Testcontainers needs no additional setup — the same mechanism runs locally and in CI.
-
----
-
-## Configuration
-
-All configuration is supplied by environment variables. See [`.env.example`](.env.example).
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `DB_URL` | `jdbc:postgresql://localhost:5432/propflow` | JDBC URL |
-| `DB_USERNAME` | `propflow` | Database user |
-| `DB_PASSWORD` | `propflow` | Database password |
-| `DB_HOST_PORT` | `5432` | Host port for the Compose database |
-| `JWT_SECRET` | **none — required** | HMAC signing key. The application refuses to start without it. Generate with `openssl rand -base64 48`. |
-| `JWT_EXPIRATION` | `1h` | Token lifetime |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200,https://prop-flow-ui.vercel.app` | Allowed browser origins; `*` is rejected |
-| `SPRING_PROFILES_ACTIVE` | `dev` | Active profile |
-| `PORT` | `8080` | HTTP port |
-
-No credential is stored in a tracked file. The database defaults above are non-secret values for a local throwaway container. `JWT_SECRET` has **no default at all**: a fallback signing key would let anyone with the source forge a token for any account, so the application fails to start with an actionable message instead.
-
----
-
-## Known Limitations
-
-Stated plainly, because the repository is a work in progress and unverified claims are worse than none. Full detail with file references is in [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md).
-
-- **Tokens cannot be revoked before they expire.** This is inherent to stateless JWT. Mitigated by a one-hour default lifetime and by reloading the user from the database on every request, so a deleted account stops authenticating immediately.
-- **No refresh-token flow.** Clients re-authenticate when the token expires.
-- **No rate limiting** on the sign-in endpoint.
-- **Timestamps use `java.util.Date`** rather than `java.time`. Mutable and timezone-blind; a migration to `Instant`/`LocalDate` is outstanding.
-- **No `Booking` API.** The table and entity exist; date-overlap prevention is not implemented.
-- **Free-text search is a sequential scan.** `LIKE '%term%'` cannot use a B-tree index. Fine at this scale; the upgrade path is a `tsvector` + GIN index.
-- **No CI**, no health endpoint, no metrics.
-- **Test coverage is partial.** Properties and the schema are covered end to end; transactions, users, and auth are not yet.
-- **OpenAPI/Swagger does not work** — the declared springdoc version targets Spring Boot 2.
-
-This project is **not production-ready** and is not deployed anywhere serving real users.
-
----
-
-## Roadmap
-
-Tracked in [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md):
-
-1. ~~Flyway schema migrations~~ *(done)*
-2. ~~Testcontainers-backed integration tests against real PostgreSQL~~ *(done)*
-3. ~~JWT authentication and role-based access control~~ *(done)*
-4. Per-user resource ownership and authorization
-5. ~~Request/response DTOs and validation across all endpoints~~ *(done)*
-6. ~~`BigDecimal` money and optimistic locking~~ *(done)*
-7. ~~Resource ownership, foreign keys, and targeted indexes~~ *(done)*
-8. Actuator health endpoints, working Docker Compose, GitHub Actions CI
-9. Architecture, security, and operations documentation
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Layers, boundaries, data and transaction model, deployment |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Auth model, secret management, disclosed incident, limitations |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Health, metrics, failure modes, troubleshooting, what breaks first |
+| [`docs/adr/`](docs/adr/) | Six architecture decision records |
+| [`docs/ENGINEERING_AUDIT.md`](docs/ENGINEERING_AUDIT.md) | The original audit — 37 findings that started this work |
+| [`docs/PORTFOLIO_HARDENING_PLAN.md`](docs/PORTFOLIO_HARDENING_PLAN.md) | The prioritised remediation plan |
+| [`AGENTS.md`](AGENTS.md) | Repository rules for AI coding agents, each citing the defect that motivated it |
 
 ---
 
